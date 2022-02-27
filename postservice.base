@@ -1,0 +1,17 @@
+FROM python:3.8
+
+RUN pip3 install pipenv
+
+ENV PROJECT_DIR /usr/src
+
+WORKDIR ${PROJECT_DIR}
+
+COPY requirements.txt ./
+
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY src/PostService ${PROJECT_DIR}
+
+EXPOSE 5002
+
+CMD ["python3", "post_service.py"]
