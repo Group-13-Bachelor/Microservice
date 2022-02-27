@@ -1,4 +1,3 @@
-from package_1 import main
 
 import unittest
 
