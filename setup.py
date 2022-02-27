@@ -1,4 +1,8 @@
 from setuptools import setup
 
 if __name__ == "__main__":
-    setup()
+    # setup()
+    data = {"key": "value"}
+    print(f"data: {data}")
+
+    print(data.items())
