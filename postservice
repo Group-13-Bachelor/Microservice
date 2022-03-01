@@ -2,9 +2,10 @@ FROM python:3.8
 
 RUN pip3 install pipenv
 
-ENV PROJECT_DIR /usr/src
+ENV PROJECT_DIR /usr/src/PostService
+ENV PYTHONPATH "${PYTHONPATH}:${PROJECT_DIR}"
 
-WORKDIR ${PROJECT_DIR}
+WORKDIR /usr/src
 
 COPY requirements.txt ./
 
@@ -14,4 +15,4 @@ COPY src/PostService ${PROJECT_DIR}
 
 EXPOSE 5002
 
-CMD ["python3", "post_service.py"]
+CMD ["python3", "PostService/post_service.py"]

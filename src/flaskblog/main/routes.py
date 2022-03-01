@@ -3,6 +3,7 @@ from flaskblog.models import Post
 from datetime import datetime
 
 import requests
+import socket
 
 main = Blueprint('main', __name__)
 
@@ -11,7 +12,8 @@ main = Blueprint('main', __name__)
 @main.route("/home")
 def home():
     # posts = Post.query.order_by(Post.date_posted.desc()).all()
-    response = requests.get('http://127.0.0.1:5002/get_all')
+    PostServiceIP = socket.gethostbyname("PostService")
+    response = requests.get(f'http://{PostServiceIP}:5002/get_all')
     posts_raw = response.json()
 
     posts = []

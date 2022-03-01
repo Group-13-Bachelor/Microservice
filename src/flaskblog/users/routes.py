@@ -57,6 +57,8 @@ def account():
         if form.picture.data:
             picture_file = save_picture(form.picture.data)
             current_user.image_file = picture_file
+
+        # TODO: move to user service
         current_user.username = form.username.data
         current_user.email = form.email.data
         db.session.commit()

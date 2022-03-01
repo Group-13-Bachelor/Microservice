@@ -1,0 +1,18 @@
+FROM python:3.8
+
+RUN pip3 install pipenv
+
+ENV PROJECT_DIR /usr/src/flaskblog
+ENV PYTHONPATH "${PYTHONPATH}:${PROJECT_DIR}"
+
+WORKDIR /usr/src
+
+COPY requirements.txt ./
+
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY src/flaskblog ${PROJECT_DIR}
+
+EXPOSE 5002
+
+CMD ["python3", "flaskblog/run.py"]

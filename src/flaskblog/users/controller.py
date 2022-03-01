@@ -3,6 +3,7 @@ from flaskblog.models import User, Post
 from datetime import datetime
 
 import requests
+import socket
 
 
 def register_user(user):
@@ -12,8 +13,8 @@ def register_user(user):
 		"password": user.password,
 		"image_file": user.image_file
 	}
-
-	response = requests.post('http://127.0.0.1:5003/register_user', json=new_user)
+	UserServiceIP = socket.gethostbyname("UserService")
+	response = requests.post(f'http://{UserServiceIP}:5003/register_user', json=new_user)
 	user_raw = response.json()
 
 	user = User(
@@ -38,8 +39,8 @@ def get_user(**kwargs):
 			user = User.query.filter_by(**{key: value}).first()
 			if user:
 				return user
-
-		response = requests.get('http://127.0.0.1:5003/get_user', json=data)
+		UserServiceIP = socket.gethostbyname("UserService")
+		response = requests.get(f'http://{UserServiceIP}:5003/get_user', json=data)
 		user_raw = response.json()
 
 		user = User(
@@ -55,7 +56,8 @@ def get_user(**kwargs):
 
 
 def get_users_posts(user_id):
-	response = requests.get(f'http://127.0.0.1:5002/post/user/{user_id}')
+	PostServiceIP = socket.gethostbyname("PostService")
+	response = requests.get(f'http://{PostServiceIP}:5002/post/user/{user_id}')
 	posts_raw = response.json()
 
 	posts = []
