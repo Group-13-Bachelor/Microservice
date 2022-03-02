@@ -7,7 +7,6 @@ from flask_bcrypt import Bcrypt
 @app.route("/register_user", methods=['POST'])
 def register_user():
 	user_json = request.get_json()
-	print(user_json)
 	user = User(
 		username=user_json["username"],
 		email=user_json["email"],
@@ -15,8 +14,6 @@ def register_user():
 		password=user_json["password"])
 	db.session.add(user)
 	db.session.commit()
-	print(user)
-	print(user.id)
 
 	return jsonify(
 		id=user.id,
@@ -36,16 +33,15 @@ def get_user():
 	elif "id" in body:
 		user = User.query.filter_by(id=body["id"]).first()
 	elif "email" in body:
-		print(body["email"])
 		user = User.query.filter_by(email=body["email"]).first()
 
 	if user is not None:
 		return jsonify(
-		id=user.id,
-		username=user.username,
-		email=user.email,
-		image_file=user.image_file,
-		password=user.password)
+			id=user.id,
+			username=user.username,
+			email=user.email,
+			image_file=user.image_file,
+			password=user.password)
 	else:
 		return Response(status=404)
 
@@ -72,4 +68,4 @@ def init_db():
 
 if __name__ == '__main__':
 	init_db()
-	app.run(host='127.0.0.1', port=5003, debug=True)
+	app.run(host='0.0.0.0', port=5003, debug=True)

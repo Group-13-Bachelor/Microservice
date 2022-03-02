@@ -1,10 +1,10 @@
-kombu==5.2.3
 itsdangerous~=2.0.1
 bcrypt==3.2.0
 Flask==2.0.2
 flask_wtf==1.0.0
 Flask-Login==0.4.1
 Flask-SQLAlchemy==2.5.1
+Flask-Bcrypt>=0.7.1
 requests==2.27.1
 WTForms~=3.0.1
 setuptools~=57.0.0

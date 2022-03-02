@@ -1,8 +1,7 @@
 import flask
 from flask import request, jsonify
 from PostService import app, db
-from PostService.model import Post
-
+from model import Post
 import sys
 
 
@@ -127,4 +126,4 @@ def init_db():
 
 if __name__ == '__main__':
 	init_db()
-	app.run(host='127.0.0.1', port=5002, debug=True)
+	app.run(host='0.0.0.0', port=5002, debug=True)

@@ -1,0 +1,16 @@
+docker build . -f postservice -t postservice:1.0
+
+docker run --rm -p 5002:5002 --name PostService postservice:1.0
+
+
+
+
+docker build . -f userservice -t userservice:1.0
+
+docker run --rm -p 5003:5003 --name UserService userservice:1.0
+
+
+
+docker build . -f webservice -t webservice:1.0
+
+docker run --rm -p 5000:5000 --name Flaskblog webservice:1.0
