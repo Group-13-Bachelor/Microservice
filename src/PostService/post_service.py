@@ -1,5 +1,5 @@
 import flask
-from flask import request, jsonify
+from flask import request, jsonify, Response
 from PostService import app, db
 from model import Post
 import sys
@@ -16,7 +16,6 @@ def save_post():
 	db.session.add(post)
 	db.session.commit()
 
-	print(f"saved new post to db: {post}", file=sys.stdout)
 	return jsonify(
 		id=post.id,
 		titl=post.title,
@@ -101,7 +100,28 @@ def delete_post():
 
 	db.session.delete(post)
 	db.session.commit()
-	return flask.Response(status=200)
+	return Response(status=200)
+
+
+@app.route("/UserUpdated", methods=['POST'])
+def update_user():
+	post_json = request.get_json()
+
+	posts = Post.query.filter_by(user_id=post_json["id"]).all()
+	for post in posts:
+		post.username = post_json["username"]
+
+	db.session.commit()
+
+	return Response(status=200)
+
+
+@app.route("/print")
+def print_all_posts():
+	posts = []
+	for post in Post.query.all():
+		posts.append(post.__str__())
+	return jsonify(posts)
 
 
 def init_db():

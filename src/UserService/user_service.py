@@ -4,7 +4,7 @@ from UserService.model import User
 from flask_bcrypt import Bcrypt
 
 
-@app.route("/register_user", methods=['POST'])
+@app.route("/UserRegistered", methods=['POST'])
 def register_user():
 	user_json = request.get_json()
 	user = User(
@@ -44,6 +44,27 @@ def get_user():
 			password=user.password)
 	else:
 		return Response(status=404)
+
+
+@app.route("/UserUpdated", methods=['POST'])
+def UserUpdated():
+	user_json = request.get_json()
+	user = User.query.filter_by(id=user_json["id"]).first()
+
+	user.username = user_json["username"]
+	user.email = user_json["email"]
+
+	db.session.commit()
+
+	return Response(status=200)
+
+
+@app.route("/print")
+def print_all_users():
+	users = []
+	for user in User.query.all():
+		users.append(user.__str__())
+	return jsonify(users)
 
 
 def init_db():

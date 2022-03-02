@@ -33,7 +33,6 @@ def get_post_id(post_id):
 	# 	if post:
 	# 		return post
 	PostServiceIP = socket.gethostbyname("PostService")
-	print(f"post IP {PostServiceIP}")
 	response = requests.get(f'http://{PostServiceIP}:5002/post/{post_id}')
 	post_raw = response.json()
 

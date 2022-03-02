@@ -14,7 +14,7 @@ def register_user(user):
 		"image_file": user.image_file
 	}
 	UserServiceIP = socket.gethostbyname("UserService")
-	response = requests.post(f'http://{UserServiceIP}:5003/register_user', json=new_user)
+	response = requests.post(f'http://{UserServiceIP}:5003/UserRegistered', json=new_user)
 	user_raw = response.json()
 
 	user = User(
@@ -28,7 +28,29 @@ def register_user(user):
 	db.session.commit()
 
 
+def update_user(current_user):
+	new_user = {
+		"id": current_user.id,
+		"username": current_user.username,
+		"email": current_user.email
+	}
+
+
+	UserServiceIP = socket.gethostbyname("UserService")
+	requests.post(f'http://{UserServiceIP}:5003/UserUpdated', json=new_user)
+
+	# Post service is also interested as it need to update the username of
+	PostServiceIP = socket.gethostbyname("PostService")
+	requests.post(f'http://{PostServiceIP}:5002/UserUpdated', json=new_user)
+
+
 def get_user(**kwargs):
+	"""
+	    Keyword Args:
+	        username (string): Users username
+	        id (int): Users ID
+	        email (string): Users Email
+	"""
 	data = None
 	for key, value in kwargs.items():
 		data = {key: value}
@@ -39,16 +61,17 @@ def get_user(**kwargs):
 			user = User.query.filter_by(**{key: value}).first()
 			if user:
 				return user
+
 		UserServiceIP = socket.gethostbyname("UserService")
 		response = requests.get(f'http://{UserServiceIP}:5003/get_user', json=data)
-		user_raw = response.json()
+		user_data = response.json()
 
 		user = User(
-			id=user_raw["id"],
-			username=user_raw["username"],
-			email=user_raw["email"],
+			id=user_data["id"],
+			username=user_data["username"],
+			email=user_data["email"],
 			image_file="default.jpg",
-			password=user_raw["password"]
+			password=user_data["password"]
 		)
 		db.session.add(user)
 		db.session.commit()

@@ -13,3 +13,6 @@ class Post(db.Model):
 
 	def __repr__(self):
 		return f"Post('{self.id}', '{self.title}', '{self.date_posted}', '{self.user_id}', '{self.username}')"
+
+	def __str__(self):
+		return f"'{self.id}', '{self.title}', '{self.date_posted}', '{self.user_id}', '{self.username}'"

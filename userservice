@@ -2,6 +2,7 @@ FROM python:3.8
 
 RUN pip3 install pipenv
 
+ENV PYTHONUNBUFFERED=1
 ENV PROJECT_DIR /usr/src/UserService
 ENV PYTHONPATH "${PYTHONPATH}:${PROJECT_DIR}"
 
