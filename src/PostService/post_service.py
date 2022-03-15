@@ -1,8 +1,83 @@
-import flask
+import sys
+import zmq
+import base64
+import json
 from flask import request, jsonify, Response
+
+
+# Local
 from PostService import app, db
 from model import Post
-import sys
+from Broker import serviceAPI
+
+
+# xpub_addr = 'tcp://127.0.0.1:5555'
+# context = zmq.Context()
+# socket_SUB = context.socket(zmq.SUB)
+# socket_SUB.connect(xpub_addr)
+# socket_SUB.setsockopt_string(zmq.SUBSCRIBE, "posts_get_all_posts")
+#
+# socket_REP = context.socket(zmq.REP)
+# socket_REP.connect("tcp://localhost:5560")
+#
+# while True:
+# 	if socket_SUB.poll(timeout=1000):
+# 		pass
+# 	if socket_REP.poll(timeout=1000):
+# 		message = socket_REP.recv()
+# 		print(f"Received request: {message}")
+# 		# socket_REP.send(b"World")
+# 		posts = []
+# 		for post in Post.query.all():
+# 			posts.append(
+# 				{
+# 					"id": post.id,
+# 					"title": post.title,
+# 					"date_posted": post.date_posted.strftime('%a, %d %b %Y %X %Z'),
+# 					"content": post.content,
+# 					"user_id": post.user_id,
+# 					"username": post.username
+# 				}
+# 			)
+# 		reply_ascii = str(posts).encode('ascii')
+# 		reply_encoded = base64.b64encode(reply_ascii)
+#
+# 		print(reply_encoded)
+# 		socket_REP.send(reply_encoded)
+
+
+def main():
+	verbose = '-v' in sys.argv
+	worker = serviceAPI.Service("tcp://localhost:5555", b"echo", True)
+	reply = None
+	while True:
+		request = worker.recv(reply)
+		if request is None:
+			break  # Worker was interrupted
+		reply = request  # Echo is complex... :-)'
+		posts = []
+
+
+		for post in Post.query.all():
+			posts.append(
+				{
+					"id": post.id,
+					"title": post.title,
+					"date_posted": post.date_posted.strftime('%a, %d %b %Y %X %Z'),
+					"content": post.content,
+					"user_id": post.user_id,
+					"username": post.username
+				}
+			)
+		reply_ascii = str(posts).encode('ascii')
+		reply_encoded = base64.b64encode(reply_ascii)
+
+		print(reply_encoded)
+		socket_REP.send(reply_encoded)
+
+
+if __name__ == '__main__':
+	main()
 
 
 @app.route("/save_post", methods=['POST'])
@@ -143,7 +218,7 @@ def init_db():
 	print("DB initialized:")
 	print(Post.query.all())
 
-
-if __name__ == '__main__':
-	init_db()
-	app.run(host='0.0.0.0', port=5002, debug=True)
+#
+# if __name__ == '__main__':
+# 	init_db()
+# 	app.run(host='0.0.0.0', port=5002, debug=True)
