@@ -1,9 +1,8 @@
 from flask import render_template, url_for, flash, redirect, request, Blueprint
 from flask_login import login_user, current_user, logout_user, login_required
 from flaskblog import db, bcrypt
-from flaskblog.models import User, Post
-from flaskblog.users.forms import (RegistrationForm, LoginForm, UpdateAccountForm,
-                                   RequestResetForm, ResetPasswordForm)
+from flaskblog.models import User
+from flaskblog.users.forms import RegistrationForm, LoginForm, UpdateAccountForm
 from flaskblog.users.utils import save_picture
 import flaskblog.users.controller as cnt
 
@@ -32,7 +31,6 @@ def login():
     form = LoginForm()
     if form.validate_on_submit():
 
-        # user = User.query.filter_by(email=form.email.data).first()
         user = cnt.get_user(email=form.email.data)
         if user and bcrypt.check_password_hash(user.password, form.password.data):
             login_user(user, remember=form.remember.data)
@@ -58,6 +56,7 @@ def account():
             picture_file = save_picture(form.picture.data)
             current_user.image_file = picture_file
 
+        # Saves user in "cache"
         current_user.username = form.username.data
         current_user.email = form.email.data
         db.session.commit()

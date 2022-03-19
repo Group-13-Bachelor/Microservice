@@ -5,12 +5,33 @@ C_CLIENT = b"MDPC01"
 #  This is the version of MDP/Worker we implement
 W_WORKER = b"MDPW01"
 
-#  MDP/Server commands, as strings
+""" MDP/Server commands, as strings
+All start with:
+Frame 0 - Client/worker peer identity added by ROUTER socket
+Frame 1 - Empty frame, de
+Frame 2 - header, C_CLIENT or W_WORKER
+W_READY
+	Frame 3 - The command
+	Frame 4 - Service name
+W_REQUEST
+	Frame 3 - Client address (envelope stack)
+	Frame 4 - Empty frame (envelope delimiter)
+	Frame 5 - Request body
+	Frame 5 - Event name	
+W_REPLY
+	Frame 3 - The command
+	Frame 4 - Client identity added by ROUTER socket
+	Frame 5 - empty frame
+	Frame 6 - Reply message to client
+	Frame 7 - Event name
+
+W_HEARTBEAT and W_DISCONNECT has no extra frames"""
 W_READY         =   b"\001"
 W_REQUEST       =   b"\002"
 W_REPLY         =   b"\003"
 W_HEARTBEAT     =   b"\004"
 W_DISCONNECT    =   b"\005"
+
 
 commands_bytes = {
 	"W_READY": W_READY,
@@ -29,6 +50,18 @@ bytes_commands = {
 }
 
 commands = [None, b"READY", b"REQUEST", b"REPLY", b"HEARTBEAT", b"DISCONNECT"]
+
+
+post_saved = b"post_saved"
+post_updated = b"post_updated"
+post_deleted = b"post_deleted"
+get_post = b"get_post"
+get_all_post = b"get_all_post"
+
+get_user = b"get_user"
+user_updated = b"user_updated"
+get_post_by_user = b"get_post_by_user"
+user_created = b"register_user"
 
 
 # Note, Python3 type "bytes" are essentially what Python2 "str" were,

@@ -1,6 +1,12 @@
 from binascii import hexlify
+from typing import Optional
+import json
+import base64
 import zmq
-import MDP
+
+
+# Local
+from common import MDP
 
 
 def dump(msg_or_socket, log=None):
@@ -32,3 +38,21 @@ def bytes_to_command(msg):
 		return command
 	else:
 		return msg
+
+
+def encode_msg(msg) -> bytes:
+	"""Encodes message to bytes
+	Excepts string like objects"""
+	# msg_ascii = str(msg).encode('ascii')
+	# return base64.b64encode(msg_ascii)
+	return str(msg).encode('ascii')
+
+
+def msg_to_dict(msg: bytes) -> dict:
+	print(f"msg_to_dict: {msg}")
+	assert msg is not None
+	# message_decoded = base64.b64decode(msg).decode('utf8')
+	message_decoded = msg.decode('ascii')
+	json_acceptable_string = message_decoded.replace("'", "\"")
+	message = json.loads(json_acceptable_string)
+	return message

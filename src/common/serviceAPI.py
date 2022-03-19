@@ -1,43 +1,34 @@
-"""Majordomo Protocol Worker API, Python version
-Implements the MDP/Worker spec at http:#rfc.zeromq.org/spec:7.
-Author: Min RK <benjaminrk@gmail.com>
-Based on Java example by Arkadiusz Orzechowski
-"""
-
 import logging
 import time
 import zmq
 
-from utils import dump, bytes_to_command
-import MDP
+# Local
+from typing import Tuple, Optional
+
+from common import MDP
+from common.utils import dump, bytes_to_command
 
 
 class Service(object):
-    """Majordomo Protocol Worker API, Python version
-    Implements the MDP/Worker spec at http:#rfc.zeromq.org/spec:7.
-    """
+    HEARTBEAT_LIVENESS = 5  # 3-5 is reasonable
+    broker = None           # Broker address
+    ctx = None              # ZMQ context
+    handler = None          # Socket to broker
+    service = []            # Name of service
+    current_service = None  # Service to reply to
 
-    HEARTBEAT_LIVENESS = 3  # 3-5 is reasonable
-    broker = None       # Broker address
-    ctx = None          # ZMQ context
-    socket = None       # Socket to broker
-    service = None      # Name of service
-
-
-    heartbeat_at = 0  # When to send HEARTBEAT (relative to time.time(), so in seconds)
-    liveness = 0      # How many attempts left
-    heartbeat = 2500  # Heartbeat delay, msecs
-    reconnect = 2500  # Reconnect delay, msecs
+    heartbeat_at = 0        # When to send HEARTBEAT (relative to time.time(), so in seconds)
+    liveness = 0            # How many attempts left
+    heartbeat = 2500        # Heartbeat delay, msecs
+    reconnect = 2500        # Reconnect delay, msecs
 
     # Internal state
-    timeout = 1000        # poller timeout
-    verbose = False       # Print activity to stdout
-    # expect_reply = False  # False only at start
-    reply_to = None       # Return address
+    timeout = 1000          # poller timeout
+    verbose = False         # Print activity to stdout
+    reply_to = None         # Return address
 
-    def __init__(self, broker, service, verbose=False):
+    def __init__(self, broker, verbose=False):
         self.broker = broker
-        self.service = service
         self.verbose = verbose
         self.ctx = zmq.Context()
         self.poller = zmq.Poller()
@@ -49,19 +40,25 @@ class Service(object):
 
     def reconnect_to_broker(self):
         """Connect or reconnect to broker"""
-        if self.socket:
-            self.poller.unregister(self.socket)
-            self.socket.close()
-        self.socket = self.ctx.socket(zmq.DEALER)
-        self.socket.linger = 0
-        self.socket.connect(self.broker)
-        self.poller.register(self.socket, zmq.POLLIN)
+        if self.handler:
+            self.poller.unregister(self.handler)
+            self.handler.close()
+        self.handler = self.ctx.socket(zmq.DEALER)
+        self.handler.linger = 0
+        self.handler.connect(self.broker)
+        self.poller.register(self.handler, zmq.POLLIN)
         if self.verbose:
-            logging.info("I: connecting to broker at %s...", self.broker)
+            logging.info(f"I: connecting to broker at {self.broker}...")
 
-        # Register service with broker
-        self.send_to_broker(MDP.W_READY, self.service, [])
-        time.sleep(1)
+        # Register worker
+        self.send_to_broker(MDP.W_READY, None, [])
+        time.sleep(2)
+
+        # Register subscriptions
+        for service in self.service:
+            if self.verbose:
+                logging.info(f"I: Subscribing to {service}")
+            self.send_to_broker(MDP.W_READY, service, [])
 
         # If liveness hits zero, queue is considered disconnected
         self.liveness = self.HEARTBEAT_LIVENESS
@@ -82,21 +79,26 @@ class Service(object):
 
         # Adds Frames to start of message:
         # Frame 0 - Empty frame
-        # Frame 1 - “MDPW01” (six bytes, representing MDP/Worker v0.1)
+        # Frame 1 - header; “MDPW01” (six bytes, representing MDP/Worker v0.1)
         # Frame 2 - command
         msg = [b'', MDP.W_WORKER, command] + msg
         # if self.verbose and command != MDP.W_HEARTBEAT:
         if self.verbose:
-            logging.info("I: sending %s to broker", bytes_to_command(command))
-            # dump(msg)
-        self.socket.send_multipart(msg)
+            if command != MDP.W_HEARTBEAT:
+                logging.info(f"I: sending {bytes_to_command(command)} to broker\n"
+                             f"\t{msg}")
+            else:
+                logging.info(f"I: sending {bytes_to_command(command)} to broker")
+        self.handler.send_multipart(msg)
 
+    def subscribe(self, event: bytes):
+        self.service.append(event)
+        self.send_to_broker(MDP.W_READY, event, [])
 
     def reply(self, msg: bytes):
         """Format and send reply to client"""
-        # assert self.expect_reply is not False
         assert self.reply_to is not None
-
+        assert self.current_service is not None
         if msg is None:
             msg = []
         elif not isinstance(msg, list):
@@ -105,14 +107,12 @@ class Service(object):
         # Frame 3 - Client address (envelope stack)
         # Frame 4 - Empty frame (envelope delimiter)
         # Frame 5 - Reply body
-        reply = [self.reply_to, b''] + msg
+        reply = [self.reply_to, b''] + msg + [self.current_service]
         self.send_to_broker(MDP.W_REPLY, msg=reply)
+        self.current_service = None
 
-    def recv(self):
+    def recv(self) -> Optional[Tuple[bytes, bytes]]:
         """waits for next request from broker"""
-
-        # self.expect_reply = True
-
         while True:
             # Poll socket for a reply, with timeout
             try:
@@ -122,7 +122,7 @@ class Service(object):
 
 
             if items:
-                msg = self.socket.recv_multipart()
+                msg = self.handler.recv_multipart()
 
                 self.liveness = self.HEARTBEAT_LIVENESS
 
@@ -130,15 +130,16 @@ class Service(object):
                 assert b'' == msg.pop(0)            # Frame 0 - empty frame
                 assert MDP.W_WORKER == msg.pop(0)   # Frame 1 - header
                 command = msg.pop(0)                # Frame 2 - one byte, representing type of Command
-
+                if self.verbose:
+                    logging.info("I: received %s from broker: ", bytes_to_command(command))
 
                 if command == MDP.W_REQUEST:
-                    if self.verbose:
-                        logging.info("I: received W_REQUEST from broker: ")
-
                     self.reply_to = msg.pop(0)      # Frame 3 - Client address (envelope stack)
                     assert b'' == msg.pop(0)        # Frame 4 - Empty frame (envelope delimiter)
-                    return msg                      # Frame 5 - Request body
+                    req = msg.pop(0)                # Frame 5 - Request body
+                    event = msg.pop(0)              # Frame 6 - event name
+                    self.current_service = event
+                    return req, event
 
                 elif command == MDP.W_HEARTBEAT:
                     pass  # Do nothing for heartbeats
@@ -152,6 +153,8 @@ class Service(object):
 
             else:
                 self.liveness -= 1
+                if self.verbose:
+                    logging.info(f"I: liveness: {self.liveness}")
                 if self.liveness == 0:
                     logging.warning("W: disconnected from broker - retrying...")
                     try:
@@ -167,7 +170,7 @@ class Service(object):
                 self.heartbeat_at = time.time() + 1e-3*self.heartbeat
 
         logging.warning("W: interrupt received, killing worker...")
-        return None
+        return (None, None)
 
 
     def destroy(self):

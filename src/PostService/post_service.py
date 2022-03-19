@@ -1,202 +1,146 @@
-import sys
-import zmq
-import base64
-import json
+from typing import List
 from flask import request, jsonify, Response
-
+import sys
+import base64
 
 # Local
 from PostService import app, db
 from model import Post
-from Broker import serviceAPI
+from common import utils, MDP, serviceAPI
 
-
-# xpub_addr = 'tcp://127.0.0.1:5555'
-# context = zmq.Context()
-# socket_SUB = context.socket(zmq.SUB)
-# socket_SUB.connect(xpub_addr)
-# socket_SUB.setsockopt_string(zmq.SUBSCRIBE, "posts_get_all_posts")
-#
-# socket_REP = context.socket(zmq.REP)
-# socket_REP.connect("tcp://localhost:5560")
-#
-# while True:
-# 	if socket_SUB.poll(timeout=1000):
-# 		pass
-# 	if socket_REP.poll(timeout=1000):
-# 		message = socket_REP.recv()
-# 		print(f"Received request: {message}")
-# 		# socket_REP.send(b"World")
-# 		posts = []
-# 		for post in Post.query.all():
-# 			posts.append(
-# 				{
-# 					"id": post.id,
-# 					"title": post.title,
-# 					"date_posted": post.date_posted.strftime('%a, %d %b %Y %X %Z'),
-# 					"content": post.content,
-# 					"user_id": post.user_id,
-# 					"username": post.username
-# 				}
-# 			)
-# 		reply_ascii = str(posts).encode('ascii')
-# 		reply_encoded = base64.b64encode(reply_ascii)
-#
-# 		print(reply_encoded)
-# 		socket_REP.send(reply_encoded)
 
 
 def main():
 	verbose = '-v' in sys.argv
-	worker = serviceAPI.Service("tcp://localhost:5555", b"echo", True)
-	reply = None
+	worker = serviceAPI.Service("tcp://localhost:5555", False)
+	worker.subscribe(MDP.get_all_post)
+	worker.subscribe(MDP.get_post)
+	worker.subscribe(MDP.post_saved)
+	worker.subscribe(MDP.post_updated)
+	worker.subscribe(MDP.post_deleted)
+
+	worker.subscribe(MDP.get_post_by_user)
+	worker.subscribe(MDP.user_updated)
+
+
 	while True:
-		request = worker.recv(reply)
-		if request is None:
-			break  # Worker was interrupted
-		reply = request  # Echo is complex... :-)'
-		posts = []
+		value, event = worker.recv()
+		print(f"event: {event}, value: {value}")
+		if event == MDP.get_all_post:
+			posts = get_all_posts()
+			msg = utils.encode_msg(posts)
+			worker.reply(msg)
+
+		elif event == MDP.get_post:
+			post = get_post(value.decode('utf-8'))
+			msg = utils.encode_msg(post)
+			worker.reply(msg)
+
+		elif event == MDP.get_post_by_user:
+			posts = get_posts_by_user(value.decode('utf-8'))
+			msg = utils.encode_msg(posts)
+			worker.reply(msg)
+
+		elif event == MDP.user_updated:
+			update_user(utils.msg_to_dict(value))
+
+		elif event == MDP.post_saved:
+			save_post(utils.msg_to_dict(value))
+
+		elif event == MDP.post_updated:
+			update_post(utils.msg_to_dict(value))
+
+		elif event == MDP.post_deleted:
+			delete_post(utils.msg_to_dict(value))
 
 
-		for post in Post.query.all():
-			posts.append(
-				{
-					"id": post.id,
-					"title": post.title,
-					"date_posted": post.date_posted.strftime('%a, %d %b %Y %X %Z'),
-					"content": post.content,
-					"user_id": post.user_id,
-					"username": post.username
-				}
-			)
-		reply_ascii = str(posts).encode('ascii')
-		reply_encoded = base64.b64encode(reply_ascii)
-
-		print(reply_encoded)
-		socket_REP.send(reply_encoded)
+def get_all_posts() -> List[dict]:
+	posts = []
+	for post in Post.query.all():
+		posts.append(
+			{
+				"id": post.id,
+				"title": post.title,
+				"date_posted": post.date_posted.strftime('%a, %d %b %Y %X %Z'),
+				"content": post.content,
+				"user_id": post.user_id,
+				"username": post.username
+			}
+		)
+	return posts
 
 
-if __name__ == '__main__':
-	main()
+def get_post(post_id: int) -> dict:
+	print(f"ID: {post_id}")
+	post = Post.query.get(post_id)
+	return {
+		"id": post.id,
+		"title": post.title,
+		"date_posted": post.date_posted.strftime('%a, %d %b %Y %X %Z'),
+		"content": post.content,
+		"user_id": post.user_id,
+		"username": post.username
+	}
 
 
-@app.route("/save_post", methods=['POST'])
-def save_post():
-	post_json = request.get_json()
+def save_post(msg: dict):
 	post = Post(
-		title=post_json["title"],
-		content=post_json["content"],
-		user_id=post_json["user_id"],
-		username=post_json["username"])
+		title=msg["title"],
+		content=msg["content"],
+		user_id=msg["user_id"],
+		username=msg["username"])
 	db.session.add(post)
 	db.session.commit()
 
-	return jsonify(
-		id=post.id,
-		titl=post.title,
-		date_posted=post.date_posted,
-		content=post.content,
-		user_id=post.user_id,
-		username=post.username
-	)
 
-
-@app.route("/post/<int:post_id>")
-def get_post_id(post_id):
-	post = Post.query.get(post_id)
-	return jsonify(
-		id=post.id,
-		title=post.title,
-		date_posted=post.date_posted,
-		content=post.content,
-		user_id=post.user_id,
-		username=post.username
-	)
-
-
-@app.route("/post/user/<int:user_id>")
-def get_posts_by_user(user_id):
+def get_posts_by_user(user_id: int) -> List[dict]:
 	posts = []
 	for post in Post.query.filter_by(user_id=user_id).all():
 		posts.append(
 			{
 				"id": post.id,
 				"title": post.title,
-				"date_posted": post.date_posted,
+				"date_posted": post.date_posted.strftime('%a, %d %b %Y %X %Z'),
 				"content": post.content,
 				"user_id": post.user_id,
 				"username": post.username
 			}
 		)
-	return jsonify(posts)
+	return posts
 
 
-@app.route("/get_all", methods=['GET'])
-def get_all_posts():
-	posts = []
-	for post in Post.query.all():
-		posts.append(
-			{
-				"id": post.id,
-				"title": post.title,
-				"date_posted": post.date_posted,
-				"content": post.content,
-				"user_id": post.user_id,
-				"username": post.username
-			}
-		)
-	return jsonify(posts)
 
-
-@app.route("/update_post", methods=['POST'])
-def update_post():
-	post_json = request.get_json()
-
-	post = Post.query.get(post_json["id"])
-	post.title = post_json["title"]
-	post.content = post_json["content"]
+def update_post(msg: dict):
+	post = Post.query.get(msg["id"])
+	post.title = msg["title"]
+	post.content = msg["content"]
 
 	db.session.commit()
 
-	return jsonify(
-		id=post.id,
-		title=post.title,
-		date_posted=post.date_posted,
-		content=post.content,
-		user_id=post.user_id,
-		username=post.username
-	)
+	for post in Post.query.all():
+		print(post)
 
 
-@app.route("/delete_post", methods=['POST'])
-def delete_post():
-	post_json = request.get_json()
-	post = Post.query.get(post_json["id"])
+
+def delete_post(msg):
+	post = Post.query.get(msg["id"])
 
 	db.session.delete(post)
 	db.session.commit()
-	return Response(status=200)
+
+	for post in Post.query.all():
+		print(post)
 
 
-@app.route("/UserUpdated", methods=['POST'])
-def update_user():
-	post_json = request.get_json()
-
-	posts = Post.query.filter_by(user_id=post_json["id"]).all()
+def update_user(msg: dict) -> None:
+	posts = Post.query.filter_by(user_id=msg["id"]).all()
 	for post in posts:
-		post.username = post_json["username"]
+		post.username = msg["username"]
 
 	db.session.commit()
 
-	return Response(status=200)
-
-
-@app.route("/print")
-def print_all_posts():
-	posts = []
 	for post in Post.query.all():
-		posts.append(post.__str__())
-	return jsonify(posts)
+		print(post)
 
 
 def init_db():
@@ -218,7 +162,7 @@ def init_db():
 	print("DB initialized:")
 	print(Post.query.all())
 
-#
-# if __name__ == '__main__':
-# 	init_db()
-# 	app.run(host='0.0.0.0', port=5002, debug=True)
+
+if __name__ == '__main__':
+	# init_db()
+	main()

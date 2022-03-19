@@ -5,11 +5,10 @@ Based on Java example by Arkadiusz Orzechowski
 """
 
 import logging
-
 import zmq
 
-import MDP
-from utils import dump
+from common import MDP
+from common.utils import dump
 
 
 class Client(object):
@@ -19,9 +18,8 @@ class Client(object):
     broker = None
     ctx = None
     client = None
-    socket_PUB = None
     poller = None
-    timeout = 2500  # in milliseconds
+    timeout = 10000  # in milliseconds
     verbose = False
 
     def __init__(self, broker, verbose=False):
@@ -60,8 +58,7 @@ class Client(object):
         # Frame 3 - Request body
         msg = [b'', MDP.C_CLIENT, service] + request
         if self.verbose:
-            logging.warning("I: send request to '%s' service: ", service)
-            dump(msg)
+            logging.info(f"I: send event {service}, msg: {msg}")
         self.client.send_multipart(msg)
 
 
@@ -86,6 +83,9 @@ class Client(object):
             assert MDP.C_CLIENT == msg.pop(0)   # Frame 1 - “MDPC01” (six bytes, representing MDP/Client v0.1)
             service = msg.pop(0)                # Frame 2 - Service name
 
-            return msg                          # Frame 4 - message body
+            if len(msg) == 1:
+                return msg.pop(0)               # Frame 4 - message body
+            else:
+                return msg                      # Frame 4 - message body
         else:
             logging.warning("W: permanent error, abandoning request")

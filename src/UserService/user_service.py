@@ -1,70 +1,76 @@
 from flask import request, jsonify, Response
+from flask_bcrypt import Bcrypt
+import sys
+
+# Local
 from UserService import app, db
 from UserService.model import User
-from flask_bcrypt import Bcrypt
+from common import utils, MDP, serviceAPI
 
 
-@app.route("/UserRegistered", methods=['POST'])
-def register_user():
-	user_json = request.get_json()
+def main():
+	verbose = '-v' in sys.argv
+	worker = serviceAPI.Service("tcp://localhost:5555", False)
+	worker.subscribe(MDP.get_user)
+	worker.subscribe(MDP.user_updated)
+	worker.subscribe(MDP.user_created)
+
+
+	while True:
+		value, event = worker.recv()
+		print(f"event: {event}, value: {value}")
+		if event == MDP.get_user:
+			posts = get_user(utils.msg_to_dict(value))
+			worker.reply(utils.encode_msg(posts))
+
+		elif event == MDP.user_updated:
+			update_user(utils.msg_to_dict(value))
+
+		elif event == MDP.user_created:
+			register_user(utils.msg_to_dict(value))
+
+
+
+def register_user(msg: dict):
 	user = User(
-		username=user_json["username"],
-		email=user_json["email"],
-		image_file=user_json["image_file"],
-		password=user_json["password"])
+		username=msg["username"],
+		email=msg["email"],
+		image_file=msg["image_file"],
+		password=msg["password"])
 	db.session.add(user)
 	db.session.commit()
 
-	return jsonify(
-		id=user.id,
-		username=user.username,
-		email=user.email,
-		image_file=user.image_file,
-		password=user.password
-	)
 
-
-@app.route("/get_user", methods=['GET'])
-def get_user():
-	body = request.get_json()
+def get_user(msg: dict):
 	user = None
-	if "username" in body:
-		user = User.query.filter_by(username=body["username"]).first()
-	elif "id" in body:
-		user = User.query.filter_by(id=body["id"]).first()
-	elif "email" in body:
-		user = User.query.filter_by(email=body["email"]).first()
+	if "username" in msg:
+		user = User.query.filter_by(username=msg["username"]).first()
+	elif "id" in msg:
+		user = User.query.filter_by(id=msg["id"]).first()
+	elif "email" in msg:
+		user = User.query.filter_by(email=msg["email"]).first()
 
 	if user is not None:
-		return jsonify(
-			id=user.id,
-			username=user.username,
-			email=user.email,
-			image_file=user.image_file,
-			password=user.password)
+		return {
+			"id": user.id,
+			"username": user.username,
+			"email": user.email,
+			"image_file": user.image_file,
+			"password": user.password
+		}
 	else:
-		return Response(status=404)
+		return 404  # TODO handle this in a better way on the receiving side
 
 
-@app.route("/UserUpdated", methods=['POST'])
-def UserUpdated():
-	user_json = request.get_json()
-	user = User.query.filter_by(id=user_json["id"]).first()
-
-	user.username = user_json["username"]
-	user.email = user_json["email"]
+def update_user(msg: dict) -> None:
+	user = User.query.filter_by(id=msg["id"]).first()
+	user.username = msg["username"]
+	user.email = msg["email"]
 
 	db.session.commit()
 
-	return Response(status=200)
-
-
-@app.route("/print")
-def print_all_users():
-	users = []
 	for user in User.query.all():
-		users.append(user.__str__())
-	return jsonify(users)
+		print(user)
 
 
 def init_db():
@@ -88,5 +94,5 @@ def init_db():
 
 
 if __name__ == '__main__':
-	init_db()
-	app.run(host='0.0.0.0', port=5003, debug=True)
+	# init_db()
+	main()
