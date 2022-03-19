@@ -3,6 +3,9 @@ from flask_sqlalchemy import SQLAlchemy
 from flask_bcrypt import Bcrypt
 from flask_login import LoginManager
 
+from common import clientAPI
+
+client = clientAPI.Client("tcp://localhost:5555", False)
 
 db = SQLAlchemy()
 bcrypt = Bcrypt()

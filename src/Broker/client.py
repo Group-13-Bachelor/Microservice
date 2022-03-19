@@ -1,5 +1,5 @@
 import sys
-from Broker import clientAPI
+from Broker import clientAPI, test
 
 
 # def main():
@@ -20,8 +20,7 @@ from Broker import clientAPI
 
 def main():
     verbose = '-v' in sys.argv
-    client = clientAPI.Client("tcp://localhost:5555", verbose)
-    count = 0
+    client = clientAPI.Client("tcp://localhost:5555", True)
     while True:
         try:
             message = input("Message: ")
@@ -34,19 +33,7 @@ def main():
         print(f"Reply from Service: {reply}")
 
 
-    # while count < 10:
-    #     request = b"Hello world"
-    #     try:
-    #         reply = client.send(b"echo", request)
-    #     except KeyboardInterrupt:
-    #         break
-    #     else:
-    #         print(f"Reply: {reply}")
-    #         # also break on failure to reply:
-    #         if reply is None:
-    #             break
-    #     count += 1
-    # print("%i requests/replies processed" % count)
+
 
 
 if __name__ == '__main__':

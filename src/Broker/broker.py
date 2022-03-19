@@ -4,14 +4,11 @@ import time
 import zmq
 
 from binascii import hexlify
-from typing import List
+from typing import List, Dict
 
 # local
-import MDP
-from utils import dump
-
-
-
+from common import MDP
+from common.utils import dump, bytes_to_command
 
 
 class Service(object):
@@ -43,34 +40,27 @@ class Worker(object):
 		self.expiry = time.time() + 1e-3 * lifetime
 
 	def __repr__(self):
-		return f'identity: {self.identity}, address: {self.address}, services: {self.services}'
-
+		return f'identity: {self.identity}, address: {self.address}, expiry: {self.expiry}, services: {self.services}'
 
 
 class MajorDomoBroker(object):
-	"""
-	Majordomo Protocol broker
-	A minimal implementation of http:#rfc.zeromq.org/spec:7 and spec:8
-	"""
-
 	# We'd normally pull these from config data
 	INTERNAL_SERVICE_PREFIX = b"mmi."
-	HEARTBEAT_INTERVAL = 2500  	# msecs
-	HEARTBEAT_LIVENESS = 3  	# 3-5 is reasonable
+	HEARTBEAT_INTERVAL = 2500  			# msecs
+	HEARTBEAT_LIVENESS = 3  			# 3-5 is reasonable
 	HEARTBEAT_EXPIRY = HEARTBEAT_INTERVAL * HEARTBEAT_LIVENESS
 
 	# ---------------------------------------------------------------------
 
-	ctx = None  			# Our context
-	socket = None  			# Socket for clients & workers
-	poller = None  			# our Poller
+	ctx = None		# Our context
+	socket = None   # Socket for clients & workers
+	poller = None   # our Poller
 
-	heartbeat_at = None		# When to send HEARTBEAT
-	services = None  	 	# known services
-	workers = None  		# known workers
-	waiting = None  		# idle workers
+	heartbeat_at = None       				# When to send HEARTBEAT
+	services: Dict[bytes, Service] = None  	# known services
+	workers: Dict[bytes, Worker] = None    	# known workers
 
-	verbose = False  		# Print activity to stdout
+	verbose = False
 
 	# ---------------------------------------------------------------------
 
@@ -79,7 +69,6 @@ class MajorDomoBroker(object):
 		self.verbose = verbose
 		self.services = {}
 		self.workers = {}
-		self.waiting = []
 		self.heartbeat_at = time.time() + 1e-3 * self.HEARTBEAT_INTERVAL
 		self.ctx = zmq.Context()
 		self.socket = self.ctx.socket(zmq.ROUTER)
@@ -102,13 +91,13 @@ class MajorDomoBroker(object):
 
 			if items:
 				msg = self.socket.recv_multipart()
-				if self.verbose:
-					logging.info("I: received message:")
-					dump(msg)
+				# if self.verbose:
+				# 	logging.info("I: received message:")
+				# 	dump(msg)
 
-				sender = msg.pop(0)			# Frame 0 - Client/worker identity added by ROUTER socket
-				assert b'' == msg.pop(0)    # Frame 1 - empty frame
-				header = msg.pop(0)			# Frame 2 - header
+				sender = msg.pop(0)  	  # Frame 0 - Client/worker peer identity added by ROUTER socket
+				assert b'' == msg.pop(0)  # Frame 1 - empty frame
+				header = msg.pop(0)  	  # Frame 2 - header
 
 				if MDP.C_CLIENT == header:
 					self.process_client(sender, msg)
@@ -120,6 +109,13 @@ class MajorDomoBroker(object):
 
 			self.purge_workers()
 			self.send_heartbeats()
+
+			# print("-------------------------------------------------")
+			# for v in self.services:
+			# 	print(self.services[v])  # ???
+			# print("-------------------------------------------------")
+
+
 
 	def destroy(self):
 		"""Disconnect all workers, destroy context."""
@@ -145,42 +141,44 @@ class MajorDomoBroker(object):
 
 		command = msg.pop(0)  # Frame 3 - the command
 
-		worker_ready = hexlify(sender) in self.workers
-
 		worker: Worker = self.require_worker(sender)
 
 		if MDP.W_READY == command:
-			assert len(msg) >= 1
-			service = msg.pop(0)  # Frame 4 - service name
+			if len(msg) >= 1:
+				service = msg.pop(0)  # Frame 4 - service name
 
-			# Not first command in session or Reserved service name
-			if worker_ready or service.startswith(self.INTERNAL_SERVICE_PREFIX):
-				self.delete_worker(worker, True)
+				# No Reserved service name
+				if service.startswith(self.INTERNAL_SERVICE_PREFIX):
+					logging.info("I: NoReserved service name")
+					self.delete_worker(worker, True)
+				else:
+					# Register service
+					if self.verbose:
+						logging.info(f"I: Worker subbed to: {service}, worker: {worker}")
+					worker.services.append(self.require_service(service))
+					self.worker_waiting(worker)
 			else:
-				# Attach worker to service and mark as idle
-				worker.services.append(self.require_service(service))
-				self.worker_waiting(worker)
+				worker.expiry = time.time() + 1e-3 * self.HEARTBEAT_EXPIRY
 
 		elif MDP.W_REPLY == command:
-			if worker_ready:
-				# Remove & save client return envelope and insert the
-				# protocol header and service name, then rewrap envelope.
-				client = msg.pop(0)  # Frame 0 - Client identity added by ROUTER socket
-				empty = msg.pop(0)	 # Frame 1 - empty frame
-				if msg != b'':
-					for service in worker.services:
-						logging.info(f"14123 - {service}")
-						msg = [client, b'', MDP.C_CLIENT, service.name] + msg
+			# Remove & save client return envelope and insert the
+			# protocol header and service name, then rewrap envelope.
+
+			client = msg.pop(0) 	# Frame 4 - Client identity added by ROUTER socket
+			empty = msg.pop(0)  	# Frame 5 - empty frame
+			reply = msg.pop(0)  	# Frame 6 - Reply message to client
+			event = msg.pop(0)  	# Frame 7 - event
+			if reply != b'':
+				for service in worker.services:
+					if service.name == event:
+						msg = [client, b'', MDP.C_CLIENT, service.name] + [reply]
 						self.socket.send_multipart(msg)
-				self.worker_waiting(worker)
-			else:
-				self.delete_worker(worker, True)
+			self.worker_waiting(worker)
 
 		elif MDP.W_HEARTBEAT == command:
-			if worker_ready:
-				worker.expiry = time.time() + 1e-3 * self.HEARTBEAT_EXPIRY
-			else:
-				self.delete_worker(worker, True)
+			if self.verbose:
+				logging.info(f"I: Heartbeat for worker: {worker}")
+			worker.expiry = time.time() + 1e-3 * self.HEARTBEAT_EXPIRY
 
 		elif MDP.W_DISCONNECT == command:
 			self.delete_worker(worker, False)
@@ -193,6 +191,7 @@ class MajorDomoBroker(object):
 		assert (address is not None)
 		identity = hexlify(address)
 		worker = self.workers.get(identity)
+
 		if worker is None:
 			worker = Worker(identity, address, self.HEARTBEAT_EXPIRY)
 			self.workers[identity] = worker
@@ -233,7 +232,7 @@ class MajorDomoBroker(object):
 	def send_heartbeats(self):
 		"""Send heartbeats to idle workers if it's time"""
 		if time.time() > self.heartbeat_at:
-			for worker in self.waiting:
+			for worker in self.workers.values():
 				self.send_to_worker(worker, MDP.W_HEARTBEAT, None, None)
 
 			self.heartbeat_at = time.time() + 1e-3 * self.HEARTBEAT_INTERVAL
@@ -242,14 +241,14 @@ class MajorDomoBroker(object):
 		"""Look for & kill expired workers.
 		Workers are oldest to most recent, so we stop at the first alive worker.
 		"""
-		while self.waiting:
-			w = self.waiting[0]
+		# logging.info("I: Looking for workers to kill: ")
+		to_delete = []
+		for w in self.workers.values():
 			if w.expiry < time.time():
-				logging.info("I: deleting expired worker: %s", w)
-				self.delete_worker(w, False)
-				self.waiting.pop(0)
-			else:
-				break
+				to_delete.append(w)
+
+		for w in to_delete:
+			self.delete_worker(w, True)
 
 	def delete_worker(self, worker: Worker, disconnect):
 		"""Deletes worker from all data structures, and deletes worker."""
@@ -257,16 +256,18 @@ class MajorDomoBroker(object):
 		if disconnect:
 			self.send_to_worker(worker, MDP.W_DISCONNECT, None, None)
 
-		if worker.services is not None:
-			for service in worker.services:
-				service.waiting.remove(worker)
+		if self.verbose:
+			logging.info("I: deleting expired worker: %s \n"
+						 "\tremoving worker from services: ", worker)
+		for service in worker.services:
+			service.waiting.remove(worker)
+			if self.verbose:
+				logging.info(f"\t{service}")
 		self.workers.pop(worker.identity)
 
 	def worker_waiting(self, worker: Worker):
 		"""This worker is now waiting for work."""
 		# Queue to broker and service waiting lists
-		if worker not in self.waiting:
-			self.waiting.append(worker)
 		for service in worker.services:
 			if worker not in service.waiting:
 				service.waiting.append(worker)
@@ -278,35 +279,34 @@ class MajorDomoBroker(object):
 		assert (service is not None)
 		if msg is not None:  # Queue message if any
 			service.requests.append(msg)
+			print(f"added request to service: {service}")
 		self.purge_workers()
 		while service.waiting and service.requests:
 			msg = service.requests.pop(0)
 
 			for worker in service.waiting:
-				print(f"Worker: {worker}")
-				# worker = service.waiting.pop(0)
-				# self.waiting.remove(worker)
-				self.send_to_worker(worker, MDP.W_REQUEST, None, msg)
+				print(f"Event: {service.name}, msg: {msg}")
+
+				self.send_to_worker(worker, MDP.W_REQUEST, service.name, msg)
 
 	def send_to_worker(self, worker, command, option, msg=None):
 		"""Send message to worker.
 		If message is provided, sends that message.
 		"""
-
 		if msg is None:
 			msg = []
 		elif not isinstance(msg, list):
 			msg = [msg]
 
-		# Stack routing and protocol envelopes to start of message
-		# and routing envelope
+		# Stack routing and protocol envelopes to start of message and routing envelope
 		if option is not None:
-			msg = [option] + msg
+			msg = option if msg is None else msg + [option]
+			# msg = [option] + msg
 		msg = [worker.address, b'', MDP.W_WORKER, command] + msg
 
 		if self.verbose and command != MDP.W_HEARTBEAT:
-			logging.info("I: sending %r to worker", command)
-			dump(msg)
+			logging.info("I: sending %r to worker", bytes_to_command(command))
+			logging.info(f"\t{dump(msg)}")
 
 		self.socket.send_multipart(msg)
 
