@@ -58,17 +58,23 @@ commands = [None, b"READY", b"REQUEST", b"REPLY", b"HEARTBEAT", b"DISCONNECT"]
 
 class EVENTS:
 	"""Constants for event names"""
+	save_post = b"save_post"
 	post_saved = b"post_saved"
-	post_updated = b"post_updated"
 	update_post = b"update_post"
+	post_updated = b"post_updated"
+	censor_post = b"censor_post"
 	post_deleted = b"post_deleted"
 	get_post = b"get_post"
 	get_all_post = b"get_all_post"
 
-	get_user = b"get_user"
+	create_user = b"create_user"
+	user_created = b"user_created"
+	update_user = b"update_user"
 	user_updated = b"user_updated"
+	censor_user = b"censor_user"
+	get_user = b"get_user"
 	get_post_by_user = b"get_post_by_user"
-	user_created = b"register_user"
+
 
 
 class GROUP:

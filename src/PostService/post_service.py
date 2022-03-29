@@ -1,19 +1,17 @@
-from typing import List
-from flask import request, jsonify, Response
+from typing import List, Dict
 import sys
-import base64
 
 # Local
 from PostService import app, db
-from model import Post
+from PostService.model import Post
 from common.MDP import EVENTS, GROUP
-from common import utils, serviceAPI
-
+from common import utils, serviceAPI, clientAPI
 
 
 def main():
 	verbose = '-v' in sys.argv
 	worker = serviceAPI.Service("tcp://localhost:5555", False)
+	client = clientAPI.Client("tcp://localhost:5555", True)
 	register(worker)
 
 
@@ -30,29 +28,32 @@ def main():
 			msg = utils.encode_msg(post)
 			worker.reply(msg)
 
-		elif event == EVENTS.get_post_by_user:
-			posts = get_posts_by_user(value.decode('utf-8'))
-			msg = utils.encode_msg(posts)
-			worker.reply(msg)
-
-		elif event == EVENTS.user_updated:
-			update_user(utils.msg_to_dict(value))
+		elif event == EVENTS.save_post:
+			post = save_post(utils.msg_to_dict(value))
+			client.send(EVENTS.post_saved, utils.encode_msg(post))
 			worker.ready()
 
-		elif event == EVENTS.post_saved:
-			save_post(utils.msg_to_dict(value))
-			worker.ready()
-
-		elif event == EVENTS.post_updated:
-			update_post(utils.msg_to_dict(value))
+		elif event == EVENTS.update_post:
+			post = update_post(utils.msg_to_dict(value))
+			client.send(EVENTS.post_updated, utils.encode_msg(post))
 			worker.ready()
 
 		elif event == EVENTS.post_deleted:
 			delete_post(utils.msg_to_dict(value))
 			worker.ready()
 
-		elif event == EVENTS.update_post:
+		elif event == EVENTS.censor_post:
 			update_post(utils.msg_to_dict(value))
+			worker.ready()
+
+		elif event == EVENTS.get_post_by_user:
+			posts = get_posts_by_user(value.decode('utf-8'))
+			msg = utils.encode_msg(posts)
+			worker.reply(msg)
+
+
+		elif event == EVENTS.user_updated:
+			update_user(utils.msg_to_dict(value))
 			worker.ready()
 
 
@@ -61,10 +62,10 @@ def register(worker):
 
 	worker.subscribe(EVENTS.get_all_post)
 	worker.subscribe(EVENTS.get_post)
-	worker.subscribe(EVENTS.post_saved)
-	worker.subscribe(EVENTS.post_updated)
-	worker.subscribe(EVENTS.post_deleted)
+	worker.subscribe(EVENTS.save_post)
 	worker.subscribe(EVENTS.update_post)
+	worker.subscribe(EVENTS.post_deleted)
+	worker.subscribe(EVENTS.censor_post)
 
 	worker.subscribe(EVENTS.get_post_by_user)
 	worker.subscribe(EVENTS.user_updated)
@@ -73,30 +74,14 @@ def register(worker):
 def get_all_posts() -> List[dict]:
 	posts = []
 	for post in Post.query.all():
-		posts.append(
-			{
-				"id": post.id,
-				"title": post.title,
-				"date_posted": post.date_posted.strftime('%a, %d %b %Y %X %Z'),
-				"content": post.content,
-				"user_id": post.user_id,
-				"username": post.username
-			}
-		)
+		posts.append(post_to_dict(post))
 	return posts
 
 
 def get_post(post_id: int) -> dict:
 	print(f"ID: {post_id}")
 	post = Post.query.get(post_id)
-	return {
-		"id": post.id,
-		"title": post.title,
-		"date_posted": post.date_posted.strftime('%a, %d %b %Y %X %Z'),
-		"content": post.content,
-		"user_id": post.user_id,
-		"username": post.username
-	}
+	return post_to_dict(post)
 
 
 def save_post(msg: dict):
@@ -107,35 +92,27 @@ def save_post(msg: dict):
 		username=msg["username"])
 	db.session.add(post)
 	db.session.commit()
+	return post_to_dict(post)
+
+
 
 
 def get_posts_by_user(user_id: int) -> List[dict]:
 	posts = []
 	for post in Post.query.filter_by(user_id=user_id).all():
-		posts.append(
-			{
-				"id": post.id,
-				"title": post.title,
-				"date_posted": post.date_posted.strftime('%a, %d %b %Y %X %Z'),
-				"content": post.content,
-				"user_id": post.user_id,
-				"username": post.username
-			}
-		)
+		posts.append(post_to_dict(post))
 	return posts
 
 
 
-def update_post(msg: dict):
+def update_post(msg: dict) -> dict:
 	post = Post.query.get(msg["id"])
 	post.title = msg["title"]
 	post.content = msg["content"]
 
 	db.session.commit()
 
-	for post in Post.query.all():
-		print(post)
-
+	return post_to_dict(post)
 
 
 def delete_post(msg):
@@ -144,19 +121,24 @@ def delete_post(msg):
 	db.session.delete(post)
 	db.session.commit()
 
-	for post in Post.query.all():
-		print(post)
 
-
-def update_user(msg: dict) -> None:
+def update_user(msg: dict):
 	posts = Post.query.filter_by(user_id=msg["id"]).all()
 	for post in posts:
 		post.username = msg["username"]
 
 	db.session.commit()
 
-	for post in Post.query.all():
-		print(post)
+
+def post_to_dict(post: Post) -> Dict[str, str]:
+	return {
+		"id": post.id,
+		"title": post.title,
+		"date_posted": post.date_posted.strftime('%a, %d %b %Y %X %Z'),
+		"content": post.content,
+		"user_id": post.user_id,
+		"username": post.username
+	}
 
 
 def init_db():

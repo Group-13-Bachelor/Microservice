@@ -26,6 +26,7 @@ class Filter:
 		self.worker.subscribe(EVENTS.user_updated)
 		self.worker.subscribe(EVENTS.user_created)
 
+
 	def work(self):
 		while True:
 			value, event = self.worker.recv()
@@ -35,7 +36,6 @@ class Filter:
 				self.filter_post_content(post)
 
 			elif event == EVENTS.post_saved:
-				# TODO handle this post. It has no ID which is expected by service
 				post = utils.msg_to_dict(value)
 				self.filter_post_content(post)
 
@@ -52,7 +52,7 @@ class Filter:
 			content = content.replace(w, "*" * len(w))
 		if words:
 			post["content"] = content
-			self.client.send(EVENTS.update_post, utils.encode_msg(post))
+			self.client.send(EVENTS.censor_post, utils.encode_msg(post))
 
 		self.worker.ready()
 

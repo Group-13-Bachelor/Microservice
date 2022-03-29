@@ -46,7 +46,7 @@ class Client(object):
         if self.verbose:
             logging.info("I: connecting to broker at %s...", self.broker)
 
-    def request(self, service, request):
+    def request(self, service, request) -> bytes:
         """Send message to broker and waits for response"""
         self.send(service, request, response=True)
         return self.recv()
@@ -67,7 +67,7 @@ class Client(object):
             logging.info(f"I: send event {service}, msg: {msg}")
         self.client.send_multipart(msg)
 
-    def recv(self):
+    def recv(self) -> bytes:
         """Returns the reply message or None if there was no reply."""
         try:
             items = self.poller.poll(self.timeout)

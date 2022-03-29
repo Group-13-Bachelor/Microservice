@@ -9,6 +9,12 @@ import flaskblog.posts.controller as cnt
 posts = Blueprint('posts', __name__)
 
 
+@posts.route("/post/test")
+def test():
+    abort(404)
+    return render_template("about.html")
+
+
 @posts.route("/post/new", methods=['GET', 'POST'])
 @login_required
 def new_post_route():
@@ -25,6 +31,8 @@ def new_post_route():
 @posts.route("/post/<int:post_id>")
 def post_route(post_id):
     post = cnt.get_post_id(post_id)
+    if isinstance(post, int):
+        abort(post)
 
     return render_template('post.html', title=post.title, post=post)
 
@@ -34,6 +42,8 @@ def post_route(post_id):
 def update_post_route(post_id):
 
     post = cnt.get_post_id(post_id)
+    if isinstance(post, int):
+        abort(post)
     if post.user_id != current_user.id:
         abort(403)
 
