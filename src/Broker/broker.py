@@ -2,6 +2,7 @@ import logging
 import sys
 import time
 import zmq
+import random
 
 from binascii import hexlify
 from typing import List, Dict
@@ -11,36 +12,41 @@ from common import MDP
 from common.utils import dump, bytes_to_command
 
 
-class Service(object):
+class Service(object): # TODO: rename to Event
 	"""a single Service"""
-	name = None  					# Service name
-	requests = None  				# List of client requests
-	waiting: List['Worker'] = None  # List of waiting workers
+	name = None  						   		 # Service name
+	requests = None  					   		 # List of client requests
+	waiting: Dict[bytes, List['Worker']] = None  # List of waiting workers
 
 	def __init__(self, name):
 		self.name = name
 		self.requests = []
-		self.waiting = []
+		self.waiting = {b"all": []}  # Default when no group given
 
 	def __repr__(self):
-		return f'Name: {self.name}, nr of reqs: {len(self.requests)}, waiting workers: {len(self.waiting)}'
+		return f'(Name: {self.name}, nr of reqs: {len(self.requests)}, waiting groups : ' \
+			   f'{[ (grp, len(wrkr)) for (grp, wrkr) in self.waiting.items()]})'
 
 
-class Worker(object):
+
+class Worker(object): # TODO: rename to consumer
 	"""a Worker, idle or active"""
 	identity = None  				# hex Identity of worker
 	address = None  				# Address to route to
-	services: List[Service] = None  # Owning service, if known
+	group = None					# Consumer group
+	services: List[Service] = None  # Services subscribed to by consumer
 	expiry = None  					# expires at this point, unless heartbeat
 
-	def __init__(self, identity, address, lifetime):
+	def __init__(self, identity, address, lifetime, group=b"all"):
 		self.identity = identity
 		self.address = address
+		self.group = group  # TODO change default to identity
 		self.services = []
 		self.expiry = time.time() + 1e-3 * lifetime
 
+
 	def __repr__(self):
-		return f'identity: {self.identity}, address: {self.address}, expiry: {self.expiry}, services: {self.services}'
+		return f'(identity: {self.identity}, address: {self.address}, group: {self.group}, services: {self.services})'
 
 
 class MajorDomoBroker(object):
@@ -112,10 +118,8 @@ class MajorDomoBroker(object):
 
 			# print("-------------------------------------------------")
 			# for v in self.services:
-			# 	print(self.services[v])  # ???
+			# 	print(self.services[v])
 			# print("-------------------------------------------------")
-
-
 
 	def destroy(self):
 		"""Disconnect all workers, destroy context."""
@@ -153,12 +157,19 @@ class MajorDomoBroker(object):
 					self.delete_worker(worker, True)
 				else:
 					# Register service
-					if self.verbose:
-						logging.info(f"I: Worker subbed to: {service}, worker: {worker}")
 					worker.services.append(self.require_service(service))
 					self.worker_waiting(worker)
 			else:
 				worker.expiry = time.time() + 1e-3 * self.HEARTBEAT_EXPIRY
+
+		elif MDP.W_GROUP == command:
+			assert len(msg) >= 1
+			group = msg.pop(0)
+			if self.verbose:
+				logging.info(f"I: Worker register to group: {group}, worker: {worker}")
+			# Assumes worker has no subscriptions yet
+			# If it does then they need to be removed from Service first
+			worker.group = group
 
 		elif MDP.W_REPLY == command:
 			# Remove & save client return envelope and insert the
@@ -173,6 +184,7 @@ class MajorDomoBroker(object):
 					if service.name == event:
 						msg = [client, b'', MDP.C_CLIENT, service.name] + [reply]
 						self.socket.send_multipart(msg)
+
 			self.worker_waiting(worker)
 
 		elif MDP.W_HEARTBEAT == command:
@@ -196,11 +208,11 @@ class MajorDomoBroker(object):
 			worker = Worker(identity, address, self.HEARTBEAT_EXPIRY)
 			self.workers[identity] = worker
 			if self.verbose:
-				logging.info("I: registering new worker: %s", identity)
+				logging.info(f"I: registering new worker: {identity}")
 
 		return worker
 
-	def require_service(self, name):
+	def require_service(self, name) -> Service:
 		"""Locates the service (creates if necessary)."""
 		assert (name is not None)
 		service = self.services.get(name)
@@ -260,7 +272,10 @@ class MajorDomoBroker(object):
 			logging.info("I: deleting expired worker: %s \n"
 						 "\tremoving worker from services: ", worker)
 		for service in worker.services:
-			service.waiting.remove(worker)
+			try:
+				service.waiting[worker.group].remove(worker)
+			except ValueError as e:
+				logging.warning(f"W: Worker not in service: {service}\n{e} ")
 			if self.verbose:
 				logging.info(f"\t{service}")
 		self.workers.pop(worker.identity)
@@ -269,25 +284,48 @@ class MajorDomoBroker(object):
 		"""This worker is now waiting for work."""
 		# Queue to broker and service waiting lists
 		for service in worker.services:
-			if worker not in service.waiting:
-				service.waiting.append(worker)
+			if worker.group in service.waiting:
+				if worker not in service.waiting[worker.group]:
+					service.waiting[worker.group].append(worker)
+					if self.verbose:
+						logging.info(f"I: Register worker to service: {service}, worker:  {worker}")
+			else:
+				service.waiting[worker.group] = [worker]
+				if self.verbose:
+					logging.info(f"I: Register worker to service: {service}, worker:  {worker}")
+
 			worker.expiry = time.time() + 1e-3 * self.HEARTBEAT_EXPIRY
 			self.dispatch(service, None)
 
 	def dispatch(self, service: Service, msg):
 		"""Dispatch requests to waiting workers as possible"""
 		assert (service is not None)
-		if msg is not None:  # Queue message if any
+
+		if msg is not None:  # Adds message to queue if any
 			service.requests.append(msg)
 			print(f"added request to service: {service}")
+
 		self.purge_workers()
-		while service.waiting and service.requests:
+		# Looping while there are available workers in groups and requests queued
+		while range(0, len(service.requests)):
 			msg = service.requests.pop(0)
+			handle = []
+			for grp, workers in service.waiting.items():
+				if workers:  # Checks if there is workers a
+					if grp == "all":
+						for w in workers:
+							handle.append(w)
+					else:
+						w = random.choice(workers)
+						handle.append(w)
 
-			for worker in service.waiting:
-				print(f"Event: {service.name}, msg: {msg}")
-
-				self.send_to_worker(worker, MDP.W_REQUEST, service.name, msg)
+			if handle:
+				for w in handle:
+					self.send_to_worker(w, MDP.W_REQUEST, service.name, msg)
+			else:
+				service.requests.insert(0, msg)
+				logging.debug("d: Breaking, no workers")
+				break  # No workers available on service
 
 	def send_to_worker(self, worker, command, option, msg=None):
 		"""Send message to worker.
@@ -300,8 +338,8 @@ class MajorDomoBroker(object):
 
 		# Stack routing and protocol envelopes to start of message and routing envelope
 		if option is not None:
-			msg = option if msg is None else msg + [option]
-			# msg = [option] + msg
+			# msg = option if msg is None else msg + [option]
+			msg = msg + [option]
 		msg = [worker.address, b'', MDP.W_WORKER, command] + msg
 
 		if self.verbose and command != MDP.W_HEARTBEAT:

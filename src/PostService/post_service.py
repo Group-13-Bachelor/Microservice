@@ -6,52 +6,68 @@ import base64
 # Local
 from PostService import app, db
 from model import Post
-from common import utils, MDP, serviceAPI
+from common.MDP import EVENTS, GROUP
+from common import utils, serviceAPI
 
 
 
 def main():
 	verbose = '-v' in sys.argv
 	worker = serviceAPI.Service("tcp://localhost:5555", False)
-	worker.subscribe(MDP.get_all_post)
-	worker.subscribe(MDP.get_post)
-	worker.subscribe(MDP.post_saved)
-	worker.subscribe(MDP.post_updated)
-	worker.subscribe(MDP.post_deleted)
-
-	worker.subscribe(MDP.get_post_by_user)
-	worker.subscribe(MDP.user_updated)
+	register(worker)
 
 
 	while True:
 		value, event = worker.recv()
 		print(f"event: {event}, value: {value}")
-		if event == MDP.get_all_post:
+		if event == EVENTS.get_all_post:
 			posts = get_all_posts()
 			msg = utils.encode_msg(posts)
 			worker.reply(msg)
 
-		elif event == MDP.get_post:
+		elif event == EVENTS.get_post:
 			post = get_post(value.decode('utf-8'))
 			msg = utils.encode_msg(post)
 			worker.reply(msg)
 
-		elif event == MDP.get_post_by_user:
+		elif event == EVENTS.get_post_by_user:
 			posts = get_posts_by_user(value.decode('utf-8'))
 			msg = utils.encode_msg(posts)
 			worker.reply(msg)
 
-		elif event == MDP.user_updated:
+		elif event == EVENTS.user_updated:
 			update_user(utils.msg_to_dict(value))
+			worker.ready()
 
-		elif event == MDP.post_saved:
+		elif event == EVENTS.post_saved:
 			save_post(utils.msg_to_dict(value))
+			worker.ready()
 
-		elif event == MDP.post_updated:
+		elif event == EVENTS.post_updated:
 			update_post(utils.msg_to_dict(value))
+			worker.ready()
 
-		elif event == MDP.post_deleted:
+		elif event == EVENTS.post_deleted:
 			delete_post(utils.msg_to_dict(value))
+			worker.ready()
+
+		elif event == EVENTS.update_post:
+			update_post(utils.msg_to_dict(value))
+			worker.ready()
+
+
+def register(worker):
+	worker.add_to_group(GROUP.post_group)
+
+	worker.subscribe(EVENTS.get_all_post)
+	worker.subscribe(EVENTS.get_post)
+	worker.subscribe(EVENTS.post_saved)
+	worker.subscribe(EVENTS.post_updated)
+	worker.subscribe(EVENTS.post_deleted)
+	worker.subscribe(EVENTS.update_post)
+
+	worker.subscribe(EVENTS.get_post_by_user)
+	worker.subscribe(EVENTS.user_updated)
 
 
 def get_all_posts() -> List[dict]:

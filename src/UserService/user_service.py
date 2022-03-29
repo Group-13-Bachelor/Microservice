@@ -5,30 +5,37 @@ import sys
 # Local
 from UserService import app, db
 from UserService.model import User
-from common import utils, MDP, serviceAPI
+from common.MDP import EVENTS, GROUP
+from common import utils, serviceAPI
 
 
 def main():
 	verbose = '-v' in sys.argv
 	worker = serviceAPI.Service("tcp://localhost:5555", False)
-	worker.subscribe(MDP.get_user)
-	worker.subscribe(MDP.user_updated)
-	worker.subscribe(MDP.user_created)
-
+	register(worker)
 
 	while True:
 		value, event = worker.recv()
 		print(f"event: {event}, value: {value}")
-		if event == MDP.get_user:
+		if event == EVENTS.get_user:
 			posts = get_user(utils.msg_to_dict(value))
 			worker.reply(utils.encode_msg(posts))
 
-		elif event == MDP.user_updated:
+		elif event == EVENTS.user_updated:
 			update_user(utils.msg_to_dict(value))
+			worker.ready()
 
-		elif event == MDP.user_created:
+		elif event == EVENTS.user_created:
 			register_user(utils.msg_to_dict(value))
+			worker.ready()
 
+
+def register(worker):
+	worker.add_to_group(GROUP.user_group)
+
+	worker.subscribe(EVENTS.get_user)
+	worker.subscribe(EVENTS.user_updated)
+	worker.subscribe(EVENTS.user_created)
 
 
 def register_user(msg: dict):

@@ -16,6 +16,7 @@ class Service(object):
     handler = None          # Socket to broker
     service = []            # Name of service
     current_service = None  # Service to reply to
+    group = None            # Consumer Group this worker belongs to
 
     heartbeat_at = 0        # When to send HEARTBEAT (relative to time.time(), so in seconds)
     liveness = 0            # How many attempts left
@@ -52,7 +53,10 @@ class Service(object):
 
         # Register worker
         self.send_to_broker(MDP.W_READY, None, [])
-        time.sleep(2)
+        if self.group is not None:
+            self.add_to_group(self.group)
+
+        time.sleep(3)
 
         # Register subscriptions
         for service in self.service:
@@ -93,10 +97,15 @@ class Service(object):
 
     def subscribe(self, event: bytes):
         self.service.append(event)
-        self.send_to_broker(MDP.W_READY, event, [])
+        self.send_to_broker(MDP.W_READY, event)
+
+    def add_to_group(self, group: bytes):
+        self.group = group
+        self.send_to_broker(MDP.W_GROUP, group)
 
     def reply(self, msg: bytes):
         """Format and send reply to client"""
+        print(f"Sending reply: {msg}, to: {self.reply_to}, Event: {self.current_service}")
         assert self.reply_to is not None
         assert self.current_service is not None
         if msg is None:
@@ -111,10 +120,15 @@ class Service(object):
         self.send_to_broker(MDP.W_REPLY, msg=reply)
         self.current_service = None
 
+    def ready(self):
+        """Tells the broker we are ready for more work when we dont need to reply"""
+        if self.verbose:
+            logging.info(f"I: Ready to broker")
+        self.reply(b"")
+
     def recv(self) -> Optional[Tuple[bytes, bytes]]:
         """waits for next request from broker"""
         while True:
-            # Poll socket for a reply, with timeout
             try:
                 items = self.poller.poll(self.timeout)
             except KeyboardInterrupt:
