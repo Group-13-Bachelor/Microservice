@@ -19,8 +19,9 @@ class Client(object):
     ctx = None
     client = None
     poller = None
-    timeout = 10000  # in milliseconds
+    timeout = 5000  # in milliseconds
     verbose = False
+    expect_reply = False
 
     def __init__(self, broker, verbose=False):
         self.broker = broker
@@ -31,7 +32,6 @@ class Client(object):
                             datefmt="%Y-%m-%d %H:%M:%S",
                             level=logging.INFO)
         self.reconnect_to_broker()
-
 
     def reconnect_to_broker(self):
         """Connect or reconnect to broker"""
@@ -46,8 +46,14 @@ class Client(object):
         if self.verbose:
             logging.info("I: connecting to broker at %s...", self.broker)
 
-    def send(self, service, request):
-        """Send request to broker"""
+    def request(self, service, request):
+        """Send message to broker and waits for response"""
+        self.send(service, request, response=True)
+        return self.recv()
+
+    def send(self, service, request, response=False):
+        """Send and forget message to broker"""
+        self.expect_reply = response
         if not isinstance(request, list):
             request = [request]
 
@@ -61,8 +67,6 @@ class Client(object):
             logging.info(f"I: send event {service}, msg: {msg}")
         self.client.send_multipart(msg)
 
-
-
     def recv(self):
         """Returns the reply message or None if there was no reply."""
         try:
@@ -70,14 +74,15 @@ class Client(object):
         except KeyboardInterrupt:
             return  # interrupted
 
-        if items:
-            # if we got a reply, process it
+        if items and self.expect_reply:
+            self.expect_reply = False
+
             msg = self.client.recv_multipart()
             if self.verbose:
                 logging.info("I: received reply:")
                 dump(msg)
 
-            # Don't try to handle errors, just assert noisily
+            # Not trying to handle errors, just asserting noisily
             assert len(msg) >= 4
             empty = msg.pop(0)                  # Frame 0 - empty frame
             assert MDP.C_CLIENT == msg.pop(0)   # Frame 1 - “MDPC01” (six bytes, representing MDP/Client v0.1)
@@ -88,4 +93,4 @@ class Client(object):
             else:
                 return msg                      # Frame 4 - message body
         else:
-            logging.warning("W: permanent error, abandoning request")
+            logging.warning(f"W: Unexpected request: {items}")

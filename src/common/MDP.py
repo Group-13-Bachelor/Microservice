@@ -1,5 +1,7 @@
 """Majordomo Protocol definitions"""
 #  This is the version of MDP/Client we implement
+from typing import Dict, List
+
 C_CLIENT = b"MDPC01"
 
 #  This is the version of MDP/Worker we implement
@@ -7,9 +9,9 @@ W_WORKER = b"MDPW01"
 
 """ MDP/Server commands, as strings
 All start with:
-Frame 0 - Client/worker peer identity added by ROUTER socket
-Frame 1 - Empty frame, de
-Frame 2 - header, C_CLIENT or W_WORKER
+	Frame 0 - Client/worker peer identity added by ROUTER socket
+	Frame 1 - Empty frame, de
+	Frame 2 - header, C_CLIENT or W_WORKER
 W_READY
 	Frame 3 - The command
 	Frame 4 - Service name
@@ -31,12 +33,14 @@ W_REQUEST       =   b"\002"
 W_REPLY         =   b"\003"
 W_HEARTBEAT     =   b"\004"
 W_DISCONNECT    =   b"\005"
+W_GROUP			=   b"\006"
 
 
 commands_bytes = {
 	"W_READY": W_READY,
 	"W_REQUEST": W_REQUEST,
 	"W_REPLY": W_REPLY,
+	"W_GROUP": W_GROUP,
 	"W_HEARTBEAT": W_HEARTBEAT,
 	"W_DISCONNECT": W_DISCONNECT
 }
@@ -52,16 +56,28 @@ bytes_commands = {
 commands = [None, b"READY", b"REQUEST", b"REPLY", b"HEARTBEAT", b"DISCONNECT"]
 
 
-post_saved = b"post_saved"
-post_updated = b"post_updated"
-post_deleted = b"post_deleted"
-get_post = b"get_post"
-get_all_post = b"get_all_post"
+class EVENTS:
+	"""Constants for event names"""
+	post_saved = b"post_saved"
+	post_updated = b"post_updated"
+	update_post = b"update_post"
+	post_deleted = b"post_deleted"
+	get_post = b"get_post"
+	get_all_post = b"get_all_post"
 
-get_user = b"get_user"
-user_updated = b"user_updated"
-get_post_by_user = b"get_post_by_user"
-user_created = b"register_user"
+	get_user = b"get_user"
+	user_updated = b"user_updated"
+	get_post_by_user = b"get_post_by_user"
+	user_created = b"register_user"
+
+
+class GROUP:
+	"""Constants for consumer group names"""
+	user_group = b"user_group"
+	post_group = b"post_group"
+	filter_group = b"filter_group"
+
+
 
 
 # Note, Python3 type "bytes" are essentially what Python2 "str" were,

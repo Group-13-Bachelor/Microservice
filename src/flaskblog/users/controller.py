@@ -5,7 +5,8 @@ from datetime import datetime
 from flaskblog import db
 from flaskblog.models import User, Post
 from flaskblog import client
-from common import utils, MDP
+from common.MDP import EVENTS
+from common import utils
 
 
 def register_user(user: User):
@@ -19,7 +20,7 @@ def register_user(user: User):
 		"password": user.password,
 		"image_file": user.image_file
 	}
-	client.send(MDP.user_created, utils.encode_msg(msg))
+	client.send(EVENTS.user_created, utils.encode_msg(msg))
 
 
 def update_user(current_user):
@@ -29,7 +30,7 @@ def update_user(current_user):
 		"email": current_user.email
 	}
 
-	client.send(MDP.user_updated, utils.encode_msg(user))
+	client.send(EVENTS.user_updated, utils.encode_msg(user))
 
 
 def get_user(**kwargs):
@@ -50,8 +51,7 @@ def get_user(**kwargs):
 			if user:
 				return user
 
-		client.send(MDP.get_user, utils.encode_msg(data))
-		message_bytes = client.recv()
+		message_bytes = client.request(EVENTS.get_user, utils.encode_msg(data))
 		msg = utils.msg_to_dict(message_bytes)
 
 		user = User(
@@ -67,8 +67,7 @@ def get_user(**kwargs):
 
 
 def get_users_posts(user_id: int) -> List[dict]:
-	client.send(MDP.get_post_by_user, str(user_id).encode('ascii'))
-	message_bytes = client.recv()
+	message_bytes = client.request(EVENTS.get_post_by_user, str(user_id).encode('ascii'))
 	msg = utils.msg_to_dict(message_bytes)
 
 	posts = []

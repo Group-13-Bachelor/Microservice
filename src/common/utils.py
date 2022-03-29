@@ -49,10 +49,9 @@ def encode_msg(msg) -> bytes:
 
 
 def msg_to_dict(msg: bytes) -> dict:
-	print(f"msg_to_dict: {msg}")
-	assert msg is not None
 	# message_decoded = base64.b64decode(msg).decode('utf8')
 	message_decoded = msg.decode('ascii')
 	json_acceptable_string = message_decoded.replace("'", "\"")
 	message = json.loads(json_acceptable_string)
+	print(f"message: {message}")
 	return message

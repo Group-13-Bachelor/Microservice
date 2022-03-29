@@ -1,29 +1,62 @@
-from common import MDP, utils, serviceAPI, clientAPI
+from typing import List
+
+from common.MDP import EVENTS, GROUP
+from common import utils, serviceAPI, clientAPI
 
 
 
-def main():
-	worker = serviceAPI.Service("tcp://localhost:5555", False)
-	worker.subscribe(MDP.post_updated)
-	worker.subscribe(MDP.post_saved)
-	worker.subscribe(MDP.user_updated)
-	worker.subscribe(MDP.user_created)
+class Filter:
+	def __init__(self, broker: str, words: List[str], verbose=False):
+		self.nono_words = words
+		self.broker = broker
+		self.worker = None
+		self.client = None
+		self.verbose = verbose
 
+		self.setup()
 
-	while True:
-		value, event = worker.recv()
-		print(f"event: {event}, value: {value}")
-		if event == MDP.post_updated:
-			post = utils.msg_to_dict(value)
-			if post["content"] == "naughty":
-				print("not nice")
-		elif event == MDP.post_saved:
-			pass
-		elif event == MDP.user_updated:
-			pass
-		elif event == MDP.user_created:
-			pass
+	def setup(self):
+		self.worker = serviceAPI.Service(self.broker, self.verbose)
+		self.client = clientAPI.Client(self.broker, self.verbose)
+
+		self.worker.add_to_group(GROUP.filter_group)
+
+		self.worker.subscribe(EVENTS.post_updated)
+		self.worker.subscribe(EVENTS.post_saved)
+		self.worker.subscribe(EVENTS.user_updated)
+		self.worker.subscribe(EVENTS.user_created)
+
+	def work(self):
+		while True:
+			value, event = self.worker.recv()
+			print(f"event: {event}, value: {value}")
+			if event == EVENTS.post_updated:
+				post = utils.msg_to_dict(value)
+				self.filter_post_content(post)
+
+			elif event == EVENTS.post_saved:
+				# TODO handle this post. It has no ID which is expected by service
+				post = utils.msg_to_dict(value)
+				self.filter_post_content(post)
+
+			elif event == EVENTS.user_updated:
+				pass
+
+			elif event == EVENTS.user_created:
+				pass
+
+	def filter_post_content(self, post):
+		content = post["content"]
+		words = [x for x in self.nono_words if x in content]
+		for w in words:
+			content = content.replace(w, "*" * len(w))
+		if words:
+			post["content"] = content
+			self.client.send(EVENTS.update_post, utils.encode_msg(post))
+
+		self.worker.ready()
 
 
 if __name__ == '__main__':
-	main()
+	f = Filter("tcp://localhost:5555", ["naughty", "Putin", "spam"])
+	f.work()
