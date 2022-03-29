@@ -1,3 +1,5 @@
+from typing import Union, List
+
 from flaskblog.models import Post
 from datetime import datetime
 
@@ -14,14 +16,29 @@ def save_new_post(post: Post):
 		"user_id": post.user_id,
 		"username": post.username
 	}
-	client.send(EVENTS.post_saved, utils.encode_msg(msg))
+	client.send(EVENTS.save_post, utils.encode_msg(msg))
 	return True
 
 
-def get_all_posts():
+def get_all_posts() -> Union[List[Post], int]:
+	"""
+	:returns: list of Post on success / Error code on failure
+	:rtypes: List[Post], or int
+	"""
 	message_bytes = client.request(EVENTS.get_all_post, "".encode('utf-8'))
-	assert message_bytes is not None
-	msg = utils.msg_to_dict(message_bytes)
+
+	try:
+		msg = utils.msg_to_dict(message_bytes)
+	except Exception as e:
+		if message_bytes is None:
+			return 404
+		else:
+			code = message_bytes.decode('ascii')
+			if isinstance(code, int):
+				return code
+			else:
+				print(f"Error getting all posts: {e}")
+				return 500
 
 	posts = []
 	for post in msg:
@@ -41,7 +58,19 @@ def get_all_posts():
 
 def get_post_id(post_id: int):
 	message_bytes = client.request(EVENTS.get_post, str(post_id).encode('utf-8'))
-	msg = utils.msg_to_dict(message_bytes)
+
+	try:
+		msg = utils.msg_to_dict(message_bytes)
+	except Exception as e:
+		if message_bytes is None:
+			return 404
+		else:
+			code = message_bytes.decode('ascii')
+			if isinstance(code, int):
+				return code
+			else:
+				print(f"Error getting all posts: {e}")
+				return 500
 
 	post = Post(
 		id=msg["id"],
@@ -62,7 +91,7 @@ def update_post(post, new_post):
 		"user_id": post.user_id,
 		"username": post.username
 	}
-	client.send(EVENTS.post_updated, utils.encode_msg(msg))
+	client.send(EVENTS.update_post, utils.encode_msg(msg))
 
 
 def delete_post(post_id):

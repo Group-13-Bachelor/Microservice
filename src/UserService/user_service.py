@@ -1,4 +1,3 @@
-from flask import request, jsonify, Response
 from flask_bcrypt import Bcrypt
 import sys
 
@@ -6,12 +5,13 @@ import sys
 from UserService import app, db
 from UserService.model import User
 from common.MDP import EVENTS, GROUP
-from common import utils, serviceAPI
+from common import utils, serviceAPI, clientAPI
 
 
 def main():
 	verbose = '-v' in sys.argv
 	worker = serviceAPI.Service("tcp://localhost:5555", False)
+	client = clientAPI.Client("tcp://localhost:5555", False)
 	register(worker)
 
 	while True:
@@ -21,21 +21,27 @@ def main():
 			posts = get_user(utils.msg_to_dict(value))
 			worker.reply(utils.encode_msg(posts))
 
-		elif event == EVENTS.user_updated:
-			update_user(utils.msg_to_dict(value))
+		elif event == EVENTS.update_user:
+			user = update_user(utils.msg_to_dict(value))
+			client.send(EVENTS.user_updated, utils.encode_msg(user))
 			worker.ready()
 
-		elif event == EVENTS.user_created:
-			register_user(utils.msg_to_dict(value))
+		elif event == EVENTS.create_user:
+			user = register_user(utils.msg_to_dict(value))
+			client.send(EVENTS.user_created, utils.encode_msg(user))
 			worker.ready()
+
+		elif event == EVENTS.censor_user:
+			pass
 
 
 def register(worker):
 	worker.add_to_group(GROUP.user_group)
 
 	worker.subscribe(EVENTS.get_user)
-	worker.subscribe(EVENTS.user_updated)
-	worker.subscribe(EVENTS.user_created)
+	worker.subscribe(EVENTS.update_user)
+	worker.subscribe(EVENTS.create_user)
+	worker.subscribe(EVENTS.censor_user)
 
 
 def register_user(msg: dict):
@@ -46,6 +52,8 @@ def register_user(msg: dict):
 		password=msg["password"])
 	db.session.add(user)
 	db.session.commit()
+
+	return user_to_dict(user)
 
 
 def get_user(msg: dict):
@@ -58,26 +66,29 @@ def get_user(msg: dict):
 		user = User.query.filter_by(email=msg["email"]).first()
 
 	if user is not None:
-		return {
-			"id": user.id,
-			"username": user.username,
-			"email": user.email,
-			"image_file": user.image_file,
-			"password": user.password
-		}
+		return user_to_dict(user)
 	else:
-		return 404  # TODO handle this in a better way on the receiving side
+		return 404
 
 
-def update_user(msg: dict) -> None:
+def update_user(msg: dict) -> dict:
 	user = User.query.filter_by(id=msg["id"]).first()
 	user.username = msg["username"]
 	user.email = msg["email"]
 
 	db.session.commit()
 
-	for user in User.query.all():
-		print(user)
+	return user_to_dict(user)
+
+
+def user_to_dict(user: User) -> dict:
+	return {
+		"id": user.id,
+		"username": user.username,
+		"email": user.email,
+		"image_file": user.image_file,
+		"password": user.password
+	}
 
 
 def init_db():

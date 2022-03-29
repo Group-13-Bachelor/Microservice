@@ -10,7 +10,7 @@ from common import utils
 
 
 def register_user(user: User):
-	# Saves user to "cache"
+	# Saves user to "cache" # TODO Check if this is necessary
 	db.session.add(user)
 	db.session.commit()
 
@@ -20,7 +20,7 @@ def register_user(user: User):
 		"password": user.password,
 		"image_file": user.image_file
 	}
-	client.send(EVENTS.user_created, utils.encode_msg(msg))
+	client.send(EVENTS.create_user, utils.encode_msg(msg))
 
 
 def update_user(current_user):
@@ -30,7 +30,7 @@ def update_user(current_user):
 		"email": current_user.email
 	}
 
-	client.send(EVENTS.user_updated, utils.encode_msg(user))
+	client.send(EVENTS.update_user, utils.encode_msg(user))
 
 
 def get_user(**kwargs):
@@ -44,7 +44,7 @@ def get_user(**kwargs):
 	for key, value in kwargs.items():
 		data = {key: value}
 
-	if data is not None:
+	if data is not None:  # TODO: improve this
 		# Super duper cache
 		for key, value in data.items():
 			user = User.query.filter_by(**{key: value}).first()
