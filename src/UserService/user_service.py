@@ -5,31 +5,31 @@ import sys
 from UserService import app, db
 from UserService.model import User
 from common.MDP import EVENTS, GROUP
-from common import utils, serviceAPI, clientAPI
+from common import utils, producerAPI, consumerAPI
 
 
 def main():
 	verbose = '-v' in sys.argv
-	worker = serviceAPI.Service("tcp://localhost:5555", False)
-	client = clientAPI.Client("tcp://localhost:5555", False)
-	register(worker)
+	consumer = consumerAPI.Consumer("tcp://localhost:5555", False)
+	producer = producerAPI.Producer("tcp://localhost:5555", False)
+	register(consumer)
 
 	while True:
-		value, event = worker.recv()
+		value, event = consumer.recv()
 		print(f"event: {event}, value: {value}")
 		if event == EVENTS.get_user:
 			posts = get_user(utils.msg_to_dict(value))
-			worker.reply(utils.encode_msg(posts))
+			consumer.reply(utils.encode_msg(posts))
 
 		elif event == EVENTS.update_user:
 			user = update_user(utils.msg_to_dict(value))
-			client.send(EVENTS.user_updated, utils.encode_msg(user))
-			worker.ready()
+			producer.send(EVENTS.user_updated, utils.encode_msg(user))
+			consumer.ready()
 
 		elif event == EVENTS.create_user:
 			user = register_user(utils.msg_to_dict(value))
-			client.send(EVENTS.user_created, utils.encode_msg(user))
-			worker.ready()
+			producer.send(EVENTS.user_created, utils.encode_msg(user))
+			consumer.ready()
 
 		elif event == EVENTS.censor_user:
 			pass

@@ -1,7 +1,7 @@
 from typing import List
 
 from common.MDP import EVENTS, GROUP
-from common import utils, serviceAPI, clientAPI
+from common import utils, producerAPI, consumerAPI
 
 
 
@@ -16,8 +16,8 @@ class Filter:
 		self.setup()
 
 	def setup(self):
-		self.worker = serviceAPI.Service(self.broker, self.verbose)
-		self.client = clientAPI.Client(self.broker, self.verbose)
+		self.worker = consumerAPI.Consumer(self.broker, self.verbose)
+		self.client = producerAPI.Producer(self.broker, self.verbose)
 
 		self.worker.add_to_group(GROUP.filter_group)
 

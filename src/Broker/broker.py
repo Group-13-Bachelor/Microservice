@@ -12,11 +12,11 @@ from common import MDP
 from common.utils import dump, bytes_to_command
 
 
-class Service(object): # TODO: rename to Event
+class Event(object):
 	"""a single Service"""
-	name = None  						   		 # Service name
-	requests = None  					   		 # List of client requests
-	waiting: Dict[bytes, List['Worker']] = None  # List of waiting workers
+	name = None  						   		   # Service name
+	requests = None  					   		   # List of client requests
+	waiting: Dict[bytes, List['Consumer']] = None  # List of waiting consumers
 
 	def __init__(self, name):
 		self.name = name
@@ -25,33 +25,31 @@ class Service(object): # TODO: rename to Event
 
 	def __repr__(self):
 		return f'(Name: {self.name}, nr of reqs: {len(self.requests)}, waiting groups : ' \
-			   f'{[ (grp, len(wrkr)) for (grp, wrkr) in self.waiting.items()]})'
+			   f'{[(grp, len(cons)) for (grp, cons) in self.waiting.items()]})'
 
 
 
-class Worker(object): # TODO: rename to consumer
-	"""a Worker, idle or active"""
-	identity = None  				# hex Identity of worker
-	address = None  				# Address to route to
-	group = None					# Consumer group
-	services: List[Service] = None  # Services subscribed to by consumer
-	expiry = None  					# expires at this point, unless heartbeat
+class Consumer(object):
+	"""a consumer, idle or active"""
+	identity = None  			# hex Identity of consumer
+	address = None  			# Address to route to
+	group = None				# Consumer group
+	events: List[Event] = None  # Events subscribed to by consumer
+	expiry = None  				# expires at this point, unless heartbeat
 
 	def __init__(self, identity, address, lifetime, group=b"all"):
 		self.identity = identity
 		self.address = address
-		self.group = group  # TODO change default to identity
-		self.services = []
+		self.group = group
+		self.events = []
 		self.expiry = time.time() + 1e-3 * lifetime
 
-
 	def __repr__(self):
-		return f'(identity: {self.identity}, address: {self.address}, group: {self.group}, services: {self.services})'
+		return f'(identity: {self.identity}, address: {self.address}, group: {self.group}, events: {self.events})'
 
 
-class MajorDomoBroker(object):
+class MessageBroker(object):
 	# We'd normally pull these from config data
-	INTERNAL_SERVICE_PREFIX = b"mmi."
 	HEARTBEAT_INTERVAL = 2500  			# msecs
 	HEARTBEAT_LIVENESS = 3  			# 3-5 is reasonable
 	HEARTBEAT_EXPIRY = HEARTBEAT_INTERVAL * HEARTBEAT_LIVENESS
@@ -59,12 +57,12 @@ class MajorDomoBroker(object):
 	# ---------------------------------------------------------------------
 
 	ctx = None		# Our context
-	socket = None   # Socket for clients & workers
+	socket = None   # Socket for clients & consumers
 	poller = None   # our Poller
 
-	heartbeat_at = None       				# When to send HEARTBEAT
-	services: Dict[bytes, Service] = None  	# known services
-	workers: Dict[bytes, Worker] = None    	# known workers
+	heartbeat_at = None       				 # When to send HEARTBEAT
+	Events: Dict[bytes, Event] = None  		 # known Events
+	Consumers: Dict[bytes, Consumer] = None  # known consumers
 
 	verbose = False
 
@@ -73,23 +71,24 @@ class MajorDomoBroker(object):
 	def __init__(self, verbose=False):
 		"""Initialize broker state."""
 		self.verbose = verbose
-		self.services = {}
-		self.workers = {}
+		self.Events = {}
+		self.Consumers = {}
 		self.heartbeat_at = time.time() + 1e-3 * self.HEARTBEAT_INTERVAL
 		self.ctx = zmq.Context()
 		self.socket = self.ctx.socket(zmq.ROUTER)
 		self.socket.linger = 0
 		self.poller = zmq.Poller()
 		self.poller.register(self.socket, zmq.POLLIN)
+		self.mediating = True  # To be able to stop the "event loop"
 		logging.basicConfig(format="%(asctime)s %(message)s",
 							datefmt="%Y-%m-%d %H:%M:%S",
 							level=logging.INFO)
 
 	# ---------------------------------------------------------------------
 
-	def mediate(self):
+	def mediate(self, ):
 		"""Main broker work happens here"""
-		while True:
+		while self.mediating:
 			try:
 				items = self.poller.poll(self.HEARTBEAT_INTERVAL)
 			except KeyboardInterrupt:
@@ -101,234 +100,214 @@ class MajorDomoBroker(object):
 				# 	logging.info("I: received message:")
 				# 	dump(msg)
 
-				sender = msg.pop(0)  	  # Frame 0 - Client/worker peer identity added by ROUTER socket
+				sender = msg.pop(0)  	  # Frame 0 - Client/consumer peer identity added by ROUTER socket
 				assert b'' == msg.pop(0)  # Frame 1 - empty frame
 				header = msg.pop(0)  	  # Frame 2 - header
 
-				if MDP.C_CLIENT == header:
-					self.process_client(sender, msg)
-				elif MDP.W_WORKER == header:
-					self.process_worker(sender, msg)
+				if MDP.P_PRODUCER == header:
+					self.process_producer(sender, msg)
+				elif MDP.C_CONSUMER == header:
+					self.process_consumer(sender, msg)
 				else:
 					logging.error("E: invalid message:")
 					dump(msg)
 
-			self.purge_workers()
+			self.purge_consumers()
 			self.send_heartbeats()
 
-			# print("-------------------------------------------------")
-			# for v in self.services:
-			# 	print(self.services[v])
-			# print("-------------------------------------------------")
 
 	def destroy(self):
-		"""Disconnect all workers, destroy context."""
-		while self.workers:
-			self.delete_worker(self.workers.values()[0], True)
+		"""Disconnect all consumers, destroy context."""
+		while self.Consumers:
+			values = self.Consumers.values()
+			self.delete_consumer(list(values)[0], True)
 		self.ctx.destroy(0)
 
-	def process_client(self, sender, msg):
+	def process_producer(self, sender, msg):
 		"""Process a request coming from a client."""
-		assert len(msg) >= 2  # Service name + body
-		service = msg.pop(0)  # Frame 3 - service name
+		assert len(msg) >= 2  # event name + body
+		event = msg.pop(0)    # Frame 3 - event name
 
 		# prefix reply with return address to client
 		msg = [sender, b''] + msg
-		if service.startswith(self.INTERNAL_SERVICE_PREFIX):
-			self.service_internal(service, msg)
-		else:
-			self.dispatch(self.require_service(service), msg)
+		self.dispatch(self.require_event(event), msg)
 
-	def process_worker(self, sender, msg):
-		"""Process message sent to us by a worker."""
+	def process_consumer(self, sender, msg):
+		"""Process message sent to us by a consumer."""
 		assert len(msg) >= 1  # At least, command
 
 		command = msg.pop(0)  # Frame 3 - the command
 
-		worker: Worker = self.require_worker(sender)
+		consumer: Consumer = self.require_consumer(sender)
 
 		if MDP.W_READY == command:
 			if len(msg) >= 1:
-				service = msg.pop(0)  # Frame 4 - service name
+				event = msg.pop(0)  # Frame 4 - event name
 
-				# No Reserved service name
-				if service.startswith(self.INTERNAL_SERVICE_PREFIX):
-					logging.info("I: NoReserved service name")
-					self.delete_worker(worker, True)
-				else:
-					# Register service
-					worker.services.append(self.require_service(service))
-					self.worker_waiting(worker)
+				# Register event
+				consumer.events.append(self.require_event(event))
+				self.consumer_waiting(consumer)
 			else:
-				worker.expiry = time.time() + 1e-3 * self.HEARTBEAT_EXPIRY
+				consumer.expiry = time.time() + 1e-3 * self.HEARTBEAT_EXPIRY
 
 		elif MDP.W_GROUP == command:
 			assert len(msg) >= 1
 			group = msg.pop(0)
 			if self.verbose:
-				logging.info(f"I: Worker register to group: {group}, worker: {worker}")
-			# Assumes worker has no subscriptions yet
+				logging.info(f"I: consumer register to group: {group}, consumer: {consumer}")
+			# Assumes consumer has no subscriptions yet
 			# If it does then they need to be removed from Service first
-			worker.group = group
+			consumer.group = group
 
 		elif MDP.W_REPLY == command:
 			# Remove & save client return envelope and insert the
-			# protocol header and service name, then rewrap envelope.
-
-			client = msg.pop(0) 	# Frame 4 - Client identity added by ROUTER socket
+			# protocol header and event name, then rewrap envelope.
+			logging.info(f"I: REPLY: {msg}")
+			client = msg.pop(0) 	# Frame 4 - Producer identity added by ROUTER socket
 			empty = msg.pop(0)  	# Frame 5 - empty frame
-			reply = msg.pop(0)  	# Frame 6 - Reply message to client
+			reply = msg.pop(0)  	# Frame 6 - Reply message to producer
 			event = msg.pop(0)  	# Frame 7 - event
+			logging.info(f"I: consumer: {consumer}")
 			if reply != b'':
-				for service in worker.services:
-					if service.name == event:
-						msg = [client, b'', MDP.C_CLIENT, service.name] + [reply]
+				for e in consumer.events:
+					if e.name == event:
+						msg = [client, b'', MDP.P_PRODUCER, e.name] + [reply]
 						self.socket.send_multipart(msg)
 
-			self.worker_waiting(worker)
+			self.consumer_waiting(consumer)
 
 		elif MDP.W_HEARTBEAT == command:
 			if self.verbose:
-				logging.info(f"I: Heartbeat for worker: {worker}")
-			worker.expiry = time.time() + 1e-3 * self.HEARTBEAT_EXPIRY
+				logging.info(f"I: Heartbeat for consumer: {consumer}")
+			consumer.expiry = time.time() + 1e-3 * self.HEARTBEAT_EXPIRY
 
 		elif MDP.W_DISCONNECT == command:
-			self.delete_worker(worker, False)
+			self.delete_consumer(consumer, False)
 		else:
 			logging.error("E: invalid message:")
 			dump(msg)
 
-	def require_worker(self, address):
-		"""Finds the worker (creates if necessary)."""
+	def require_consumer(self, address):
+		"""Finds the consumer (creates if necessary)."""
 		assert (address is not None)
 		identity = hexlify(address)
-		worker = self.workers.get(identity)
+		consumer = self.Consumers.get(identity)
 
-		if worker is None:
-			worker = Worker(identity, address, self.HEARTBEAT_EXPIRY)
-			self.workers[identity] = worker
+		if consumer is None:
+			consumer = Consumer(identity, address, self.HEARTBEAT_EXPIRY)
+			self.Consumers[identity] = consumer
 			if self.verbose:
-				logging.info(f"I: registering new worker: {identity}")
+				logging.info(f"I: registering new consumer: {identity}")
 
-		return worker
+		return consumer
 
-	def require_service(self, name) -> Service:
-		"""Locates the service (creates if necessary)."""
+	def require_event(self, name) -> Event:
+		"""Locates the event (creates if necessary)."""
 		assert (name is not None)
-		service = self.services.get(name)
-		if service is None:
-			service = Service(name)
-			self.services[name] = service
+		event = self.Events.get(name)
+		if event is None:
+			event = Event(name)
+			self.Events[name] = event
+			if self.verbose:
+				logging.info(f"I: registering new event: {event}")
 
-		return service
+		return event
 
 	def bind(self, endpoint):
 		"""Bind broker to endpoint, can call this multiple times.
-		We use a single socket for both clients and workers.
+		We use a single socket for both clients and consumers.
 		"""
 		self.socket.bind(endpoint)
 		logging.info("I: MDP broker/0.1.1 is active at %s", endpoint)
 
-	def service_internal(self, service, msg):
-		"""Handle internal service according to 8/MMI specification"""
-		returncode = b"501"
-		if b"mmi.service" == service:
-			name = msg[-1]
-			returncode = b"200" if name in self.services else b"404"
-		msg[-1] = returncode
-
-		# insert the protocol header and service name after the routing envelope ([client, ''])
-		msg = msg[:2] + [MDP.C_CLIENT, service] + msg[2:]
-		self.socket.send_multipart(msg)
-
 	def send_heartbeats(self):
-		"""Send heartbeats to idle workers if it's time"""
+		"""Send heartbeats to idle consumers if it's time"""
 		if time.time() > self.heartbeat_at:
-			for worker in self.workers.values():
-				self.send_to_worker(worker, MDP.W_HEARTBEAT, None, None)
+			for consumer in self.Consumers.values():
+				self.send_to_consumer(consumer, MDP.W_HEARTBEAT, None, None)
 
 			self.heartbeat_at = time.time() + 1e-3 * self.HEARTBEAT_INTERVAL
 
-	def purge_workers(self):
-		"""Look for & kill expired workers.
-		Workers are oldest to most recent, so we stop at the first alive worker.
+	def purge_consumers(self):
+		"""Look for & kills expired consumers.
+		consumers are oldest to most recent, so we stop at the first alive consumer.
 		"""
-		# logging.info("I: Looking for workers to kill: ")
 		to_delete = []
-		for w in self.workers.values():
-			if w.expiry < time.time():
-				to_delete.append(w)
+		for consumer in self.Consumers.values():
+			if consumer.expiry < time.time():
+				to_delete.append(consumer)
 
-		for w in to_delete:
-			self.delete_worker(w, True)
+		for consumer in to_delete:
+			self.delete_consumer(consumer, True)
 
-	def delete_worker(self, worker: Worker, disconnect):
-		"""Deletes worker from all data structures, and deletes worker."""
-		assert worker is not None
+	def delete_consumer(self, consumer: Consumer, disconnect):
+		"""Deletes consumer from all data structures, and deletes consumer instance."""
+		assert consumer is not None
 		if disconnect:
-			self.send_to_worker(worker, MDP.W_DISCONNECT, None, None)
+			self.send_to_consumer(consumer, MDP.W_DISCONNECT, None, None)
 
 		if self.verbose:
-			logging.info("I: deleting expired worker: %s \n"
-						 "\tremoving worker from services: ", worker)
-		for service in worker.services:
+			logging.info("I: deleting expired consumer: %s \n"
+						 "\tremoving consumer from event: ", consumer)
+		for event in consumer.events:
 			try:
-				service.waiting[worker.group].remove(worker)
+				event.waiting[consumer.group].remove(consumer)
 			except ValueError as e:
-				logging.warning(f"W: Worker not in service: {service}\n{e} ")
+				logging.warning(f"W: consumer not in event: {event}\n{e} ")
 			if self.verbose:
-				logging.info(f"\t{service}")
-		self.workers.pop(worker.identity)
+				logging.info(f"\t{event}")
+		self.Consumers.pop(consumer.identity)
 
-	def worker_waiting(self, worker: Worker):
-		"""This worker is now waiting for work."""
-		# Queue to broker and service waiting lists
-		for service in worker.services:
-			if worker.group in service.waiting:
-				if worker not in service.waiting[worker.group]:
-					service.waiting[worker.group].append(worker)
+	def consumer_waiting(self, consumer: Consumer):
+		"""This consumer is now waiting for work."""
+		# Queue to broker and event waiting lists
+		for event in consumer.events:
+			if consumer.group in event.waiting:
+				if consumer not in event.waiting[consumer.group]:
+					event.waiting[consumer.group].append(consumer)
 					if self.verbose:
-						logging.info(f"I: Register worker to service: {service}, worker:  {worker}")
+						logging.info(f"I: Register consumer to event: {event}, consumer:  {consumer}")
 			else:
-				service.waiting[worker.group] = [worker]
+				event.waiting[consumer.group] = [consumer]
 				if self.verbose:
-					logging.info(f"I: Register worker to service: {service}, worker:  {worker}")
+					logging.info(f"I: Register consumer to event: {event}, consumer:  {consumer}")
 
-			worker.expiry = time.time() + 1e-3 * self.HEARTBEAT_EXPIRY
-			self.dispatch(service, None)
+			consumer.expiry = time.time() + 1e-3 * self.HEARTBEAT_EXPIRY
+			self.dispatch(event, None)
 
-	def dispatch(self, service: Service, msg):
-		"""Dispatch requests to waiting workers as possible"""
-		assert (service is not None)
+	def dispatch(self, event: Event, msg):
+		"""Dispatch requests to waiting consumers as possible"""
+		assert (event is not None)
 
 		if msg is not None:  # Adds message to queue if any
-			service.requests.append(msg)
-			print(f"added request to service: {service}")
+			event.requests.append(msg)
+			if self.verbose:
+				logging.info(f"I: added request to service: {event}")
 
-		self.purge_workers()
-		# Looping while there are available workers in groups and requests queued
-		while range(0, len(service.requests)):
-			msg = service.requests.pop(0)
+		self.purge_consumers()
+		# Looping while there are available consumers in groups and requests queued
+		while range(0, len(event.requests)):
+			msg = event.requests.pop(0)
 			handle = []
-			for grp, workers in service.waiting.items():
-				if workers:  # Checks if there is workers a
+			for grp, consumers in event.waiting.items():
+				if consumers:  # Checks if there is consumers a
 					if grp == "all":
-						for w in workers:
+						for w in consumers:
 							handle.append(w)
 					else:
-						w = random.choice(workers)
+						w = random.choice(consumers)
 						handle.append(w)
 
 			if handle:
 				for w in handle:
-					self.send_to_worker(w, MDP.W_REQUEST, service.name, msg)
+					self.send_to_consumer(w, MDP.W_REQUEST, event.name, msg)
 			else:
-				service.requests.insert(0, msg)
-				logging.debug("d: Breaking, no workers")
-				break  # No workers available on service
+				event.requests.insert(0, msg)
+				logging.debug("d: Breaking, no consumers")
+				break  # No consumers available on service
 
-	def send_to_worker(self, worker, command, option, msg=None):
-		"""Send message to worker.
+	def send_to_consumer(self, consumer: Consumer, command, option, msg=None):
+		"""Send message to consumer.
 		If message is provided, sends that message.
 		"""
 		if msg is None:
@@ -340,10 +319,10 @@ class MajorDomoBroker(object):
 		if option is not None:
 			# msg = option if msg is None else msg + [option]
 			msg = msg + [option]
-		msg = [worker.address, b'', MDP.W_WORKER, command] + msg
+		msg = [consumer.address, b'', MDP.C_CONSUMER, command] + msg
 
 		if self.verbose and command != MDP.W_HEARTBEAT:
-			logging.info("I: sending %r to worker", bytes_to_command(command))
+			logging.info("I: sending %r to consumer", bytes_to_command(command))
 			logging.info(f"\t{dump(msg)}")
 
 		self.socket.send_multipart(msg)
@@ -352,7 +331,7 @@ class MajorDomoBroker(object):
 def main():
 	"""create and start new broker"""
 	verbose = '-v' in sys.argv
-	broker = MajorDomoBroker(True)
+	broker = MessageBroker(True)
 	broker.bind("tcp://*:5555")
 	broker.mediate()
 

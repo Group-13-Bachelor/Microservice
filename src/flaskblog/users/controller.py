@@ -4,13 +4,13 @@ from datetime import datetime
 # Local
 from flaskblog import db
 from flaskblog.models import User, Post
-from flaskblog import client
+from flaskblog import producer
 from common.MDP import EVENTS
 from common import utils
 
 
 def register_user(user: User):
-	# Saves user to "cache" # TODO Check if this is necessary
+	# Saves user to "cache"
 	db.session.add(user)
 	db.session.commit()
 
@@ -18,9 +18,11 @@ def register_user(user: User):
 		"username": user.username,
 		"email": user.email,
 		"password": user.password,
-		"image_file": user.image_file
+		"image_file": user.image_file  # This will be None if user is not committed
 	}
-	client.send(EVENTS.create_user, utils.encode_msg(msg))
+	producer.send(EVENTS.create_user, utils.encode_msg(msg))  # TODO This should be a command to check if we can create the user
+
+
 
 
 def update_user(current_user):
@@ -30,7 +32,7 @@ def update_user(current_user):
 		"email": current_user.email
 	}
 
-	client.send(EVENTS.update_user, utils.encode_msg(user))
+	producer.send(EVENTS.update_user, utils.encode_msg(user))
 
 
 def get_user(**kwargs):
@@ -51,7 +53,7 @@ def get_user(**kwargs):
 			if user:
 				return user
 
-		message_bytes = client.request(EVENTS.get_user, utils.encode_msg(data))
+		message_bytes = producer.request(EVENTS.get_user, utils.encode_msg(data))
 		msg = utils.msg_to_dict(message_bytes)
 
 		user = User(
@@ -67,7 +69,7 @@ def get_user(**kwargs):
 
 
 def get_users_posts(user_id: int) -> List[dict]:
-	message_bytes = client.request(EVENTS.get_post_by_user, str(user_id).encode('ascii'))
+	message_bytes = producer.request(EVENTS.get_post_by_user, str(user_id).encode('ascii'))
 	msg = utils.msg_to_dict(message_bytes)
 
 	posts = []

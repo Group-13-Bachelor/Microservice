@@ -11,7 +11,7 @@ from common import MDP
 from common.utils import dump
 
 
-class Client(object):
+class Producer(object):
     """Majordomo Protocol Client API, Python version.
       Implements the MDP/Worker spec at http:#rfc.zeromq.org/spec:7.
     """
@@ -46,6 +46,9 @@ class Client(object):
         if self.verbose:
             logging.info("I: connecting to broker at %s...", self.broker)
 
+    def destroy(self):
+        self.ctx.destroy(0)
+
     def request(self, service, request) -> bytes:
         """Send message to broker and waits for response"""
         self.send(service, request, response=True)
@@ -62,7 +65,7 @@ class Client(object):
         # Frame 1 - "MDPCxy" (six bytes, MDP/Client x.y)
         # Frame 2 - Service name
         # Frame 3 - Request body
-        msg = [b'', MDP.C_CLIENT, service] + request
+        msg = [b'', MDP.P_PRODUCER, service] + request
         if self.verbose:
             logging.info(f"I: send event {service}, msg: {msg}")
         self.client.send_multipart(msg)
@@ -85,7 +88,7 @@ class Client(object):
             # Not trying to handle errors, just asserting noisily
             assert len(msg) >= 4
             empty = msg.pop(0)                  # Frame 0 - empty frame
-            assert MDP.C_CLIENT == msg.pop(0)   # Frame 1 - “MDPC01” (six bytes, representing MDP/Client v0.1)
+            assert MDP.P_PRODUCER == msg.pop(0)   # Frame 1 - “MDPC01” (six bytes, representing MDP/Client v0.1)
             service = msg.pop(0)                # Frame 2 - Service name
 
             if len(msg) == 1:

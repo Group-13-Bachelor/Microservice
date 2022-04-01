@@ -20,7 +20,7 @@ from common import clientAPI
 
 def main():
     verbose = '-v' in sys.argv
-    client = clientAPI.Client("tcp://localhost:5555", True)
+    client = clientAPI.Producer("tcp://localhost:5555", True)
     while True:
         try:
             message = input("Message: ")
