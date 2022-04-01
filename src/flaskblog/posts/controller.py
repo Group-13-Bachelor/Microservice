@@ -4,7 +4,7 @@ from flaskblog.models import Post
 from datetime import datetime
 
 # Local
-from flaskblog import client
+from flaskblog import producer
 from common.MDP import EVENTS
 from common import utils
 
@@ -16,7 +16,7 @@ def save_new_post(post: Post):
 		"user_id": post.user_id,
 		"username": post.username
 	}
-	client.send(EVENTS.save_post, utils.encode_msg(msg))
+	producer.send(EVENTS.save_post, utils.encode_msg(msg))
 	return True
 
 
@@ -25,7 +25,7 @@ def get_all_posts() -> Union[List[Post], int]:
 	:returns: list of Post on success / Error code on failure
 	:rtypes: List[Post], or int
 	"""
-	message_bytes = client.request(EVENTS.get_all_post, "".encode('utf-8'))
+	message_bytes = producer.request(EVENTS.get_all_post, "".encode('utf-8'))
 
 	try:
 		msg = utils.msg_to_dict(message_bytes)
@@ -57,7 +57,7 @@ def get_all_posts() -> Union[List[Post], int]:
 
 
 def get_post_id(post_id: int):
-	message_bytes = client.request(EVENTS.get_post, str(post_id).encode('utf-8'))
+	message_bytes = producer.request(EVENTS.get_post, str(post_id).encode('utf-8'))
 
 	try:
 		msg = utils.msg_to_dict(message_bytes)
@@ -91,11 +91,11 @@ def update_post(post, new_post):
 		"user_id": post.user_id,
 		"username": post.username
 	}
-	client.send(EVENTS.update_post, utils.encode_msg(msg))
+	producer.send(EVENTS.update_post, utils.encode_msg(msg))
 
 
 def delete_post(post_id):
 	msg = {
 		"id": post_id
 	}
-	client.send(EVENTS.post_deleted, utils.encode_msg(msg))
+	producer.send(EVENTS.post_deleted, utils.encode_msg(msg))

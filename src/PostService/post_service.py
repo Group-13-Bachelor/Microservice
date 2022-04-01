@@ -5,56 +5,55 @@ import sys
 from PostService import app, db
 from PostService.model import Post
 from common.MDP import EVENTS, GROUP
-from common import utils, serviceAPI, clientAPI
+from common import utils, consumerAPI, producerAPI
 
 
 def main():
 	verbose = '-v' in sys.argv
-	worker = serviceAPI.Service("tcp://localhost:5555", False)
-	client = clientAPI.Client("tcp://localhost:5555", True)
-	register(worker)
+	consumer = consumerAPI.Consumer("tcp://localhost:5555", False)
+	producer = producerAPI.Producer("tcp://localhost:5555", True)
+	register(consumer)
 
 
 	while True:
-		value, event = worker.recv()
+		value, event = consumer.recv()
 		print(f"event: {event}, value: {value}")
 		if event == EVENTS.get_all_post:
 			posts = get_all_posts()
 			msg = utils.encode_msg(posts)
-			worker.reply(msg)
+			consumer.reply(msg)
 
 		elif event == EVENTS.get_post:
 			post = get_post(value.decode('utf-8'))
 			msg = utils.encode_msg(post)
-			worker.reply(msg)
+			consumer.reply(msg)
 
 		elif event == EVENTS.save_post:
 			post = save_post(utils.msg_to_dict(value))
-			client.send(EVENTS.post_saved, utils.encode_msg(post))
-			worker.ready()
+			producer.send(EVENTS.post_saved, utils.encode_msg(post))
+			consumer.ready()
 
 		elif event == EVENTS.update_post:
 			post = update_post(utils.msg_to_dict(value))
-			client.send(EVENTS.post_updated, utils.encode_msg(post))
-			worker.ready()
+			producer.send(EVENTS.post_updated, utils.encode_msg(post))
+			consumer.ready()
 
 		elif event == EVENTS.post_deleted:
 			delete_post(utils.msg_to_dict(value))
-			worker.ready()
+			consumer.ready()
 
 		elif event == EVENTS.censor_post:
 			update_post(utils.msg_to_dict(value))
-			worker.ready()
+			consumer.ready()
 
 		elif event == EVENTS.get_post_by_user:
 			posts = get_posts_by_user(value.decode('utf-8'))
 			msg = utils.encode_msg(posts)
-			worker.reply(msg)
-
+			consumer.reply(msg)
 
 		elif event == EVENTS.user_updated:
 			update_user(utils.msg_to_dict(value))
-			worker.ready()
+			consumer.ready()
 
 
 def register(worker):

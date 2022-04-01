@@ -9,7 +9,7 @@ from common import MDP
 from common.utils import dump, bytes_to_command
 
 
-class Service(object):
+class Consumer(object):
     HEARTBEAT_LIVENESS = 5  # 3-5 is reasonable
     broker = None           # Broker address
     ctx = None              # ZMQ context
@@ -33,6 +33,7 @@ class Service(object):
         self.verbose = verbose
         self.ctx = zmq.Context()
         self.poller = zmq.Poller()
+        self.waiting = True
         logging.basicConfig(format="%(asctime)s %(message)s",
                             datefmt="%Y-%m-%d %H:%M:%S",
                             level=logging.INFO)
@@ -85,7 +86,7 @@ class Service(object):
         # Frame 0 - Empty frame
         # Frame 1 - header; “MDPW01” (six bytes, representing MDP/Worker v0.1)
         # Frame 2 - command
-        msg = [b'', MDP.W_WORKER, command] + msg
+        msg = [b'', MDP.C_CONSUMER, command] + msg
         # if self.verbose and command != MDP.W_HEARTBEAT:
         if self.verbose:
             if command != MDP.W_HEARTBEAT:
@@ -105,7 +106,7 @@ class Service(object):
 
     def reply(self, msg: bytes):
         """Format and send reply to client"""
-        print(f"Sending reply: {msg}, to: {self.reply_to}, Event: {self.current_service}")
+
         assert self.reply_to is not None
         assert self.current_service is not None
         if msg is None:
@@ -117,6 +118,7 @@ class Service(object):
         # Frame 4 - Empty frame (envelope delimiter)
         # Frame 5 - Reply body
         reply = [self.reply_to, b''] + msg + [self.current_service]
+        print(f"Sending reply: {msg}\nto: {self.reply_to}, \nEvent: {self.current_service}\n")
         self.send_to_broker(MDP.W_REPLY, msg=reply)
         self.current_service = None
 
@@ -128,7 +130,7 @@ class Service(object):
 
     def recv(self) -> Optional[Tuple[bytes, bytes]]:
         """waits for next request from broker"""
-        while True:
+        while self.waiting:
             try:
                 items = self.poller.poll(self.timeout)
             except KeyboardInterrupt:
@@ -142,7 +144,7 @@ class Service(object):
 
                 assert len(msg) >= 3
                 assert b'' == msg.pop(0)            # Frame 0 - empty frame
-                assert MDP.W_WORKER == msg.pop(0)   # Frame 1 - header
+                assert MDP.C_CONSUMER == msg.pop(0)   # Frame 1 - header
                 command = msg.pop(0)                # Frame 2 - one byte, representing type of Command
                 if self.verbose:
                     logging.info("I: received %s from broker: ", bytes_to_command(command))

@@ -1,11 +1,10 @@
 """Majordomo Protocol definitions"""
 #  This is the version of MDP/Client we implement
-from typing import Dict, List
-
-C_CLIENT = b"MDPC01"
+P_PRODUCER = b"MDPC01"
 
 #  This is the version of MDP/Worker we implement
-W_WORKER = b"MDPW01"
+C_CONSUMER = b"MDPW01"
+
 
 """ MDP/Server commands, as strings
 All start with:
@@ -14,7 +13,7 @@ All start with:
 	Frame 2 - header, C_CLIENT or W_WORKER
 W_READY
 	Frame 3 - The command
-	Frame 4 - Service name
+	Frame 4 - Event name
 W_REQUEST
 	Frame 3 - Client address (envelope stack)
 	Frame 4 - Empty frame (envelope delimiter)
@@ -36,15 +35,6 @@ W_DISCONNECT    =   b"\005"
 W_GROUP			=   b"\006"
 
 
-commands_bytes = {
-	"W_READY": W_READY,
-	"W_REQUEST": W_REQUEST,
-	"W_REPLY": W_REPLY,
-	"W_GROUP": W_GROUP,
-	"W_HEARTBEAT": W_HEARTBEAT,
-	"W_DISCONNECT": W_DISCONNECT
-}
-
 bytes_commands = {
 	b'\001': "W_READY",
 	b'\002': "W_REQUEST",
@@ -52,8 +42,6 @@ bytes_commands = {
 	b'\004': "W_HEARTBEAT",
 	b'\005': "W_DISCONNECT"
 }
-
-commands = [None, b"READY", b"REQUEST", b"REPLY", b"HEARTBEAT", b"DISCONNECT"]
 
 
 class EVENTS:
@@ -74,7 +62,6 @@ class EVENTS:
 	censor_user = b"censor_user"
 	get_user = b"get_user"
 	get_post_by_user = b"get_post_by_user"
-
 
 
 class GROUP:
